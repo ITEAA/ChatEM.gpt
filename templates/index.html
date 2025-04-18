@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>GPT 챗봇</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #f4f4f4;
+      margin: 0;
+      padding: 30px 0;
+      display: flex;
+      justify-content: center;
+    }
+
+    #chatContainer {
+      width: 100%;
+      max-width: 600px;
+      background: white;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+      display: flex;
+      flex-direction: column;
+    }
+
+    #chatBox {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 10px;
+      background: #fafafa;
+      border-radius: 8px;
+      min-height: 300px; /* 💡 항상 공간 확보 */
+      overflow-y: auto;
+    }
+
+    .message {
+      padding: 10px 15px;
+      border-radius: 15px;
+      max-width: 80%;
+      word-wrap: break-word;
+      white-space: pre-wrap;
+    }
+
+    .user {
+      background: #d1e7dd;
+      align-self: flex-end;
+    }
+
+    .gpt {
+      background: #e2e3e5;
+      align-self: flex-start;
+    }
+
+    #inputArea {
+      display: flex;
+      margin-top: 15px;
+    }
+
+    #userInput {
+      flex: 1;
+      padding: 10px;
+      font-size: 16px;
+      border-radius: 5px;
+      border: 1px solid #ccc;
+    }
+
+    #sendBtn {
+      padding: 10px 20px;
+      font-size: 16px;
+      margin-left: 10px;
+      border: none;
+      background-color: #4CAF50;
+      color: white;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    #sendBtn:hover {
+      background-color: #45a049;
+    }
+  </style>
+</head>
+<body>
+  <div id="chatContainer">
+    <h2>ChatEM</h2>
+    <div id="chatBox"></div>
+    <div id="inputArea">
+      <input type="text" id="userInput" placeholder="메시지를 입력하세요..." onkeydown="handleKey(event)" />
+      <button id="sendBtn" onclick="sendMessage()">보내기</button>
+    </div>
+  </div>
+
+  <script>
+    async function sendMessage() {
+      const input = document.getElementById("userInput");
+      const chatBox = document.getElementById("chatBox");
+      const message = input.value.trim();
+      if (!message) return;
+
+      const userDiv = document.createElement("div");
+      userDiv.className = "message user";
+      userDiv.innerText = "You: " + message;
+      chatBox.appendChild(userDiv);
+
+      const loadingDiv = document.createElement("div");
+      loadingDiv.className = "message gpt";
+      loadingDiv.innerText = "GPT가 응답 중입니다...";
+      chatBox.appendChild(loadingDiv);
+
+      input.value = "";
+
+      try {
+        const response = await fetch("/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message })
+        });
+
+        const data = await response.json();
+        loadingDiv.innerText = "GPT: " + data.reply;
+      } catch (error) {
+        loadingDiv.innerText = "GPT 오류 발생: " + error.message;
+      }
+
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    function handleKey(e) {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    }
+  </script>
+</body>
+</html>
