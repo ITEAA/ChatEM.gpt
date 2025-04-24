@@ -96,8 +96,11 @@
   <div id="chatContainer">
     <h2>ChatEM</h2>
     <div id="chatBox"></div>
-
-    <div id="inputArea">
+     <textarea id="chatBox" rows="15" cols="60" readonly>
+GPT: 안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊  
+자기소개서나 이력서를 첨부해주시면 더 정확한 추천이 가능해요!
+  </textarea><br>
+      <div id="inputArea">
       <input type="file" id="fileInput" accept=".txt,.pdf,.doc,.docx" />
       <div id="inputRow">
         <input type="text" id="userInput" placeholder="메시지를 입력하세요..." onkeydown="handleKey(event)" />
