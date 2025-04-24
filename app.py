@@ -13,6 +13,7 @@ client = OpenAI()
 
 with open("prompt.txt", "r", encoding="utf-8") as f:
     system_prompt = f.read()
+print("📌 프롬프트 내용:\n", system_prompt)
 
 assistant_id = "asst_u2QSs359lwwE4ChWE9PO7p3K"  # ← Assistant ID 입력
 
