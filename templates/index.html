@@ -96,10 +96,6 @@
   <div id="chatContainer">
     <h2>ChatEM</h2>
     <div id="chatBox"></div>
-     <textarea id="chatBox" rows="15" cols="60" readonly>
-GPT: 안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊  
-자기소개서나 이력서를 첨부해주시면 더 정확한 추천이 가능해요!
-  </textarea><br>
       <div id="inputArea">
       <input type="file" id="fileInput" accept=".txt,.pdf,.doc,.docx" />
       <div id="inputRow">
@@ -110,6 +106,13 @@ GPT: 안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊
   </div>
 
   <script>
+    window.onload = () => {
+    const chatBox = document.getElementById("chatBox");
+    const welcomeDiv = document.createElement("div");
+    welcomeDiv.className = "message gpt";
+    welcomeDiv.innerText = "GPT: 안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊\n자기소개서나 이력서를 첨부해주시면 더 정확한 추천이 가능해요!";
+    chatBox.appendChild(welcomeDiv);
+    };
     async function sendMessage() {
       const input = document.getElementById("userInput");
       const fileInput = document.getElementById("fileInput");
