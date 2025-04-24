@@ -96,9 +96,13 @@
   <div id="chatContainer">
     <h2>ChatEM</h2>
     <div id="chatBox"></div>
-      <div id="inputArea">
-      <input type="file" id="fileInput" accept=".txt,.pdf,.doc,.docx" />
-      <div id="inputRow">
+      <form id="chatForm" enctype="multipart/form-data" onsubmit="sendMessage(event)">
+        <div id="inputArea">
+          <input type="text" id="userInput" name="message" placeholder="메시지를 입력하세요..." />
+          <input type="file" id="fileInput" name="file" />
+          <button type="submit" id="sendBtn">보내기</button>
+        </div>
+      </form>
         <input type="text" id="userInput" placeholder="메시지를 입력하세요..." onkeydown="handleKey(event)" />
         <button id="sendBtn" onclick="sendMessage()">보내기</button>
       </div>
@@ -113,48 +117,52 @@
     welcomeDiv.innerText = "GPT: 안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊\n자기소개서나 이력서를 첨부해주시면 더 정확한 추천이 가능해요!";
     chatBox.appendChild(welcomeDiv);
     };
-    async function sendMessage() {
-      const input = document.getElementById("userInput");
-      const fileInput = document.getElementById("fileInput");
-      const chatBox = document.getElementById("chatBox");
-      const message = input.value.trim();
-      const file = fileInput.files[0];
+    async function sendMessage(event) {
+        event.preventDefault();  // 폼 자동 제출 방지
 
-      if (!message) return;
+        const input = document.getElementById("userInput");
+        const fileInput = document.getElementById("fileInput");
+        const chatBox = document.getElementById("chatBox");
 
-      const userDiv = document.createElement("div");
-      userDiv.className = "message user";
-      userDiv.innerText = "You: " + message;
-      chatBox.appendChild(userDiv);
+        const message = input.value.trim();
+        const file = fileInput.files[0];
 
-      const loadingDiv = document.createElement("div");
-      loadingDiv.className = "message gpt";
-      loadingDiv.innerText = "GPT가 응답 중입니다...";
-      chatBox.appendChild(loadingDiv);
+        if (!message) return;
 
-      const formData = new FormData();
-      formData.append("message", message);
-      if (file) {
-        formData.append("file", file);
+        // 사용자 메시지 출력
+        const userDiv = document.createElement("div");
+        userDiv.className = "message user";
+        userDiv.innerText = "You: " + message;
+        chatBox.appendChild(userDiv);
+
+        // 로딩 메시지 출력
+        const loadingDiv = document.createElement("div");
+        loadingDiv.className = "message gpt";
+        loadingDiv.innerText = "GPT가 응답 중입니다...";
+        chatBox.appendChild(loadingDiv);
+
+        // 전송 준비
+        const formData = new FormData();
+        formData.append("message", message);
+        if (file) formData.append("file", file);
+
+        input.value = "";
+        fileInput.value = "";
+
+        try {
+          const response = await fetch("/chat", {
+            method: "POST",
+            body: formData
+          });
+
+          const data = await response.json();
+          loadingDiv.innerText = "GPT: " + data.reply;
+        } catch (error) {
+          loadingDiv.innerText = "GPT 오류 발생: " + error.message;
+        }
+
+        chatBox.scrollTop = chatBox.scrollHeight;
       }
-
-      input.value = "";
-      fileInput.value = "";
-
-      try {
-        const response = await fetch("/chat", {
-          method: "POST",
-          body: formData
-        });
-
-        const data = await response.json();
-        loadingDiv.innerText = "GPT: " + data.reply;
-      } catch (error) {
-        loadingDiv.innerText = "GPT 오류 발생: " + error.message;
-      }
-
-      chatBox.scrollTop = chatBox.scrollHeight;
-    }
 
     function handleKey(e) {
       if (e.key === "Enter" && !e.shiftKey) {
