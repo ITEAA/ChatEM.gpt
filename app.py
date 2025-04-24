@@ -1,44 +1,72 @@
+from flask import Flask, request, jsonify, render_template
 import time
-import os
-from flask import Flask, request, jsonify
 from openai import OpenAI
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+print("🔑 API 키 로드됨:", os.getenv("OPENAI_API_KEY"))
 
 app = Flask(__name__)
 
-# ✅ 명시적으로 API 키 사용
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI()
 
-# ✅ Assistant 객체는 생성된 ID를 직접 지정하거나 1회만 생성되게 해야 함
-assistant = client.beta.assistants.create(
-    name="웹 챗봇",
-    instructions="친절하고 유익하게 응답하세요.",
-    model="gpt-4-1106-preview"
-)
-thread = client.beta.threads.create()
+assistant_id = "asst_u2QSs359lwwE4ChWE9PO7p3K"  # ← Assistant ID 입력
+
+@app.route("/")
+def index():
+    return render_template("index.html")
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    user_message = request.json["message"]
+    try:
+        user_message = request.json["message"]
 
-    client.beta.threads.messages.create(
-        thread_id=thread.id,
-        role="user",
-        content=user_message
-    )
+        # ✅ 매 요청마다 새 thread 생성
+        thread = client.beta.threads.create()
 
-    run = client.beta.threads.runs.create(
-        thread_id=thread.id,
-        assistant_id=assistant.id
-    )
+        # 메시지 추가
+        client.beta.threads.messages.create(
+            thread_id=thread.id,
+            role="user",
+            content=user_message
+        )
 
-    while run.status not in ["completed", "failed", "cancelled"]:
-        time.sleep(1)
-        run = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
+        # Run 실행
+        run = client.beta.threads.runs.create(
+            thread_id=thread.id,
+            assistant_id=assistant_id
+        )
+        print("🚀 Run 생성:", run)
 
-    messages = client.beta.threads.messages.list(thread_id=thread.id, order="desc")
-    for msg in messages.data:
-        for content in msg.content:
-            if content.type == "text":
-                return jsonify(reply=content.text.value)
+        # Run 완료까지 대기
+        while run.status not in ["completed", "failed", "cancelled"]:
+            time.sleep(1)
+            run = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
+            print("⏳ Run 상태:", run.status)
 
-    return jsonify(reply="죄송합니다. 응답을 가져오지 못했습니다.")
+        print("✅ 최종 Run 상태:", run.status)
+
+        # 응답 메시지 조회
+        messages = client.beta.threads.messages.list(thread_id=thread.id, order="desc")
+        print("📥 메시지 목록:", messages)
+
+        for msg in messages.data:
+            print("🧾 역할:", msg.role)
+            print("📦 콘텐츠:", msg.content)
+            if msg.role == "assistant":
+                for content in msg.content:
+                    if content.type == "text":
+                        print("🟢 GPT 응답:", content.text.value)
+                        return jsonify(reply=content.text.value)
+
+        return jsonify(reply="GPT 응답 없음")
+
+    except Exception as e:
+        print("❌ 서버 에러:", str(e))
+        return jsonify(reply="서버 오류 발생: " + str(e)), 500
+
+if __name__ == "__main__":
+    import os
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
