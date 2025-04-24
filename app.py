@@ -11,6 +11,15 @@ app = Flask(__name__)
 
 client = OpenAI()
 
+with open("prompt.txt", "r", encoding="utf-8") as f:
+    system_prompt = f.read()
+
+assistant = client.beta.assistants.create(
+    name="기업 추천 챗봇",
+    instructions=system_prompt,
+    model="gpt-4-1106-preview"
+)
+
 assistant_id = "asst_u2QSs359lwwE4ChWE9PO7p3K"  # ← Assistant ID 입력
 
 @app.route("/")
