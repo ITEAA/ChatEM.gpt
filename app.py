@@ -11,7 +11,7 @@ app = Flask(__name__)
 
 client = OpenAI()
 
-with open("ChatEM prompt.txt", "r", encoding="utf-8") as f:
+with open("prompt.txt", "r", encoding="utf-8") as f:
     system_prompt = f.read()
 
 assistant = client.beta.assistants.create(
