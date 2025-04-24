@@ -1,45 +1,44 @@
-from flask import Flask, request, jsonify, render_template
-from openai import OpenAI
-from dotenv import load_dotenv
+import time
 import os
-
-# 🔑 API 키 불러오기
-load_dotenv()
-print("🔑 API 키 로드됨:", os.getenv("OPENAI_API_KEY"))
+from flask import Flask, request, jsonify
+from openai import OpenAI
 
 app = Flask(__name__)
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))  # .env에서 로드
 
-system_prompt = "당신은 친절하고 정확한 기업 추천 AI 챗봇입니다. 사용자의 관심사, 이력서, 자기소개서 내용을 바탕으로 유익하고 신뢰도 높은 기업을 추천해 주세요."
+# ✅ 명시적으로 API 키 사용
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ✅ 프롬프트 함수 분리
-def make_messages(user_input):
-    return [
-        {"role": "system", "content" : system_prompt},
-        {"role": "user", "content" :  user_input}
-    ]
-
-@app.route("/")
-def index():
-    return render_template("index.html")
+# ✅ Assistant 객체는 생성된 ID를 직접 지정하거나 1회만 생성되게 해야 함
+assistant = client.beta.assistants.create(
+    name="웹 챗봇",
+    instructions="친절하고 유익하게 응답하세요.",
+    model="gpt-4-1106-preview"
+)
+thread = client.beta.threads.create()
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    try:
-        user_message = request.json["message"]
+    user_message = request.json["message"]
 
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",  # 또는 gpt-4 (API 충전 상태라면)
-            messages=make_messages(user_message)
-        )
+    client.beta.threads.messages.create(
+        thread_id=thread.id,
+        role="user",
+        content=user_message
+    )
 
-        reply = response.choices[0].message.content.strip()
-        print("🟢 GPT 응답:", reply)
-        return jsonify(reply=reply)
+    run = client.beta.threads.runs.create(
+        thread_id=thread.id,
+        assistant_id=assistant.id
+    )
 
-    except Exception as e:
-        print("❌ 서버 에러:", str(e))
-        return jsonify(reply="서버 오류 발생: " + str(e)), 500
+    while run.status not in ["completed", "failed", "cancelled"]:
+        time.sleep(1)
+        run = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
 
-if __name__ == "__main__":
-    app.run(debug=True)
+    messages = client.beta.threads.messages.list(thread_id=thread.id, order="desc")
+    for msg in messages.data:
+        for content in msg.content:
+            if content.type == "text":
+                return jsonify(reply=content.text.value)
+
+    return jsonify(reply="죄송합니다. 응답을 가져오지 못했습니다.")
