@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>GPT 챗봇</title>
+  <title>ChatEM</title>
   <style>
     body {
       font-family: 'Segoe UI', sans-serif;
@@ -31,7 +31,7 @@
       padding: 10px;
       background: #fafafa;
       border-radius: 8px;
-      min-height: 300px; /* 💡 항상 공간 확보 */
+      min-height: 300px;
       overflow-y: auto;
     }
 
@@ -55,7 +55,17 @@
 
     #inputArea {
       display: flex;
+      flex-direction: column;
       margin-top: 15px;
+    }
+
+    #fileInput {
+      margin-top: 8px;
+    }
+
+    #inputRow {
+      display: flex;
+      margin-top: 10px;
     }
 
     #userInput {
@@ -86,17 +96,24 @@
   <div id="chatContainer">
     <h2>ChatEM</h2>
     <div id="chatBox"></div>
+
     <div id="inputArea">
-      <input type="text" id="userInput" placeholder="메시지를 입력하세요..." onkeydown="handleKey(event)" />
-      <button id="sendBtn" onclick="sendMessage()">보내기</button>
+      <input type="file" id="fileInput" accept=".txt,.pdf,.doc,.docx" />
+      <div id="inputRow">
+        <input type="text" id="userInput" placeholder="메시지를 입력하세요..." onkeydown="handleKey(event)" />
+        <button id="sendBtn" onclick="sendMessage()">보내기</button>
+      </div>
     </div>
   </div>
 
   <script>
     async function sendMessage() {
       const input = document.getElementById("userInput");
+      const fileInput = document.getElementById("fileInput");
       const chatBox = document.getElementById("chatBox");
       const message = input.value.trim();
+      const file = fileInput.files[0];
+
       if (!message) return;
 
       const userDiv = document.createElement("div");
@@ -109,13 +126,19 @@
       loadingDiv.innerText = "GPT가 응답 중입니다...";
       chatBox.appendChild(loadingDiv);
 
+      const formData = new FormData();
+      formData.append("message", message);
+      if (file) {
+        formData.append("file", file);
+      }
+
       input.value = "";
+      fileInput.value = "";
 
       try {
         const response = await fetch("/chat", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message })
+          body: formData
         });
 
         const data = await response.json();
