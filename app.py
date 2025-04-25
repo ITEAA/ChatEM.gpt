@@ -9,7 +9,6 @@ client = OpenAI()
 
 app = Flask(__name__)
 
-# ✅ 실제 Assistant ID로 교체
 assistant_id = "asst_WW6opruOKAP1tdK7NAHvD6Yk"
 
 @app.route("/")
