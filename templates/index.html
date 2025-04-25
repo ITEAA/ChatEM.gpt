@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>ChatEM - AI 기업 추천 챗봇</title>
+  <title>ChatEM</title>
   <style>
     body {
       font-family: 'Segoe UI', sans-serif;
@@ -41,6 +41,7 @@
       max-width: 80%;
       word-wrap: break-word;
       white-space: pre-wrap;
+      line-height: 1.4;
     }
 
     .user {
@@ -53,23 +54,25 @@
       align-self: flex-start;
     }
 
-    form {
+    #inputArea {
       display: flex;
       flex-direction: column;
-      gap: 10px;
       margin-top: 15px;
+      gap: 10px;
     }
 
     #userInput {
-      width: 100%;
       padding: 10px;
       font-size: 16px;
       border-radius: 5px;
       border: 1px solid #ccc;
+      width: 100%;
+      resize: vertical;
+      min-height: 60px;
     }
 
     #fileInput {
-      font-size: 14px;
+      border: none;
     }
 
     #sendBtn {
@@ -86,6 +89,12 @@
     #sendBtn:hover {
       background-color: #45a049;
     }
+
+    .filename {
+      font-size: 0.9em;
+      color: #555;
+      margin-left: 5px;
+    }
   </style>
 </head>
 <body>
@@ -93,42 +102,47 @@
     <h2>ChatEM</h2>
     <div id="chatBox">
       <div class="message gpt">
-        GPT: 안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊<br>
+        GPT: 안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊<br />
         자기소개서나 이력서를 첨부해주시면 더 정확한 추천이 가능해요!
       </div>
     </div>
 
-    <form id="chatForm" enctype="multipart/form-data">
-      <textarea id="userInput" name="message" placeholder="메시지를 입력하세요..." rows="3"></textarea>
-      <input type="file" name="file" id="fileInput" />
-      <button type="submit" id="sendBtn">보내기</button>
-    </form>
+    <div id="inputArea">
+      <textarea id="userInput" placeholder="메시지를 입력하세요..." onkeydown="handleKey(event)"></textarea>
+      <input type="file" id="fileInput" />
+      <button id="sendBtn" onclick="sendMessage()">보내기</button>
+    </div>
   </div>
 
   <script>
-    document.getElementById("chatForm").addEventListener("submit", async function (e) {
-      e.preventDefault();
+    async function sendMessage() {
       const input = document.getElementById("userInput");
       const fileInput = document.getElementById("fileInput");
       const chatBox = document.getElementById("chatBox");
       const message = input.value.trim();
+      const file = fileInput.files[0];
 
-      if (!message && !fileInput.files.length) return;
+      if (!message && !file) return;
 
-      const userDiv = document.createElement("div");
-      userDiv.className = "message user";
-      userDiv.innerText = "You: " + message;
-      chatBox.appendChild(userDiv);
+      // 사용자 메시지 출력
+      if (message) {
+        const userDiv = document.createElement("div");
+        userDiv.className = "message user";
+        userDiv.innerText = "You: " + message;
+        chatBox.appendChild(userDiv);
+      }
 
+      // 로딩 메시지 출력
       const loadingDiv = document.createElement("div");
       loadingDiv.className = "message gpt";
       loadingDiv.innerText = "GPT가 응답 중입니다...";
       chatBox.appendChild(loadingDiv);
 
+      // 서버 요청
       const formData = new FormData();
       formData.append("message", message);
-      if (fileInput.files.length > 0) {
-        formData.append("file", fileInput.files[0]);
+      if (file) {
+        formData.append("file", file);
       }
 
       try {
@@ -143,10 +157,19 @@
         loadingDiv.innerText = "GPT 오류 발생: " + error.message;
       }
 
+      // 입력 초기화
       input.value = "";
       fileInput.value = "";
+
       chatBox.scrollTop = chatBox.scrollHeight;
-    });
+    }
+
+    function handleKey(e) {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    }
   </script>
 </body>
 </html>
