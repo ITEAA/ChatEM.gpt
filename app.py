@@ -18,20 +18,24 @@ def index():
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
-        user_message = request.form["message"]  # ✅ FormData에서 받음
-        file = request.files.get("file", None)  # ✅ 파일 첨부 받기 (필요시 사용)
+        user_message = request.form.get("message", "")
+        uploaded_file = request.files.get("file")
 
-        # thread 생성
+        # (선택사항) 파일 내용 확인 로그
+        if uploaded_file:
+            print(f"📁 파일 업로드됨: {uploaded_file.filename}")
+            # 예시: 파일 내용을 문자열로 읽기 (작은 텍스트 파일만)
+            file_content = uploaded_file.read().decode("utf-8", errors="ignore")
+            user_message += f"\n\n[첨부 파일 내용 요약]:\n{file_content[:1000]}"  # 1000자 제한
+
         thread = client.beta.threads.create()
 
-        # 메시지 추가
         client.beta.threads.messages.create(
             thread_id=thread.id,
             role="user",
             content=user_message
         )
 
-        # Run 실행
         run = client.beta.threads.runs.create(
             thread_id=thread.id,
             assistant_id=assistant_id
@@ -44,14 +48,14 @@ def chat():
         messages = client.beta.threads.messages.list(thread_id=thread.id, order="desc")
 
         for msg in messages.data:
-            if msg.role == "assistant":
-                for content in msg.content:
-                    if content.type == "text":
-                        return jsonify(reply=content.text.value)
+            for content in msg.content:
+                if content.type == "text":
+                    return jsonify(reply=content.text.value)
 
         return jsonify(reply="GPT 응답 없음")
 
     except Exception as e:
+        print("❌ 서버 에러:", str(e))
         return jsonify(reply="서버 오류 발생: " + str(e)), 500
 
 if __name__ == "__main__":
