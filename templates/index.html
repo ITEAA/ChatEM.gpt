@@ -105,6 +105,13 @@
   </div>
 
 <script>
+  window.onload = function () {
+    const chatBox = document.getElementById("chatBox");
+    const greetingDiv = document.createElement("div");
+    greetingDiv.className = "message gpt";
+    greetingDiv.innerText = "GPT: 안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊\n자기소개서나 이력서를 첨부해주시면 더 정확한 추천이 가능해요!";
+    chatBox.appendChild(greetingDiv);
+  };
   async function sendMessage(event) {
     event.preventDefault();
 
