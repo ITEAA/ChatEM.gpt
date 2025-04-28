@@ -9,7 +9,7 @@ client = OpenAI()
 
 app = Flask(__name__)
 
-assistant_id = "asst_WW6opruOKAP1tdK7NAHvD6Yk"
+assistant_id = "asst_WW6opruOKAP1tdK7NAHvD6Yk"  # 실제 assistant ID 사용
 
 @app.route("/")
 def index():
@@ -18,25 +18,20 @@ def index():
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
-        user_message = request.form.get("message", "").strip()
+        user_message = request.form.get("message", "")
         uploaded_file = request.files.get("file")
 
-        # ✅ 파일이 첨부되었을 경우, 텍스트 내용 일부를 메시지에 포함
-        if uploaded_file and uploaded_file.filename:
-            print(f"📁 업로드된 파일명: {uploaded_file.filename}")
-            try:
-                file_content = uploaded_file.read().decode("utf-8", errors="ignore")
-                user_message += f"\n\n[첨부 파일 내용 발췌]:\n{file_content[:1000]}"  # 최대 1000자
-            except Exception as file_err:
-                print(f"⚠️ 파일 처리 오류: {file_err}")
+        if uploaded_file:
+            print(f"📁 파일 업로드됨: {uploaded_file.filename}")
+            file_content = uploaded_file.read().decode("utf-8", errors="ignore")
+            user_message += f"\n\n[첨부 파일 내용 요약]:\n{file_content[:1000]}"
 
-        # ✅ 쓰레드 생성 → 메시지 추가 → Run 실행
         thread = client.beta.threads.create()
 
         client.beta.threads.messages.create(
             thread_id=thread.id,
             role="user",
-            content=user_message or "안녕하세요!"
+            content=user_message
         )
 
         run = client.beta.threads.runs.create(
