@@ -2,171 +2,155 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>ChatEM</title>
+  <title>ChatEM 기업 매칭 챗봇</title>
   <style>
     body {
-      margin: 0;
-      padding: 0;
-      background-color: #f6f7f9;
       font-family: 'Segoe UI', sans-serif;
+      background-color: #f4f4f4;
+      margin: 0;
+      padding: 30px 0;
       display: flex;
       justify-content: center;
     }
 
     #chatContainer {
       width: 100%;
-      max-width: 720px;
+      max-width: 600px;
+      background: white;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
       display: flex;
       flex-direction: column;
-      height: 100vh;
-      padding: 0 16px;
-      box-sizing: border-box;
     }
 
     #chatBox {
-      flex: 1;
-      margin-top: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 10px;
+      background: #fafafa;
+      border-radius: 8px;
+      min-height: 300px;
+      max-height: 500px;
       overflow-y: auto;
-      padding-bottom: 20px;
     }
 
     .message {
-      max-width: 70%;
-      margin: 8px 0;
       padding: 10px 15px;
-      border-radius: 20px;
-      line-height: 1.4;
+      border-radius: 15px;
+      max-width: 80%;
+      word-wrap: break-word;
       white-space: pre-wrap;
-      word-break: break-word;
     }
 
     .user {
-      background-color: #dcf8c6;
+      background: #d1e7dd;
       align-self: flex-end;
-      border-bottom-right-radius: 0;
     }
 
     .gpt {
-      background-color: #ffffff;
+      background: #e2e3e5;
       align-self: flex-start;
-      border-bottom-left-radius: 0;
     }
 
     #inputArea {
       display: flex;
-      align-items: center;
-      padding: 10px 0;
-      border-top: 1px solid #ddd;
-      background-color: #fff;
-    }
-
-    #fileInput {
-      display: none;
-    }
-
-    .file-btn {
-      width: 36px;
-      height: 36px;
-      border: 1px solid #ccc;
-      border-radius: 50%;
-      background: none;
-      font-size: 22px;
-      line-height: 34px;
-      text-align: center;
-      margin-right: 10px;
-      cursor: pointer;
+      flex-direction: column;
+      margin-top: 15px;
+      gap: 10px;
     }
 
     #userInput {
-      flex: 1;
-      padding: 12px 15px;
-      font-size: 15px;
-      border-radius: 20px;
+      padding: 10px;
+      font-size: 16px;
+      border-radius: 5px;
       border: 1px solid #ccc;
-      outline: none;
+    }
+
+    #fileInput {
+      border: none;
     }
 
     #sendBtn {
-      background-color: black;
-      color: white;
+      padding: 10px;
+      font-size: 16px;
       border: none;
-      padding: 10px 16px;
-      margin-left: 10px;
-      font-size: 14px;
-      border-radius: 20px;
+      background-color: #4CAF50;
+      color: white;
+      border-radius: 5px;
       cursor: pointer;
+      width: 100px;
+      align-self: flex-end;
     }
 
     #sendBtn:hover {
-      background-color: #333;
+      background-color: #45a049;
     }
   </style>
 </head>
 <body>
   <div id="chatContainer">
+    <h2>ChatEM</h2>
     <div id="chatBox">
-      <!-- 인삿말 -->
-      <div class="message gpt">
-        안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊<br>
-        자기소개서나 이력서를 첨부해주시면 더 정확한 추천이 가능해요!
-      </div>
+      <div class="message gpt">안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊<br>자기소개서나 이력서를 첨부해주시면 더 정확한 추천이 가능해요!</div>
     </div>
 
     <div id="inputArea">
-      <label class="file-btn" for="fileInput">+</label>
+      <textarea id="userInput" placeholder="메시지를 입력하세요..." rows="2"></textarea>
       <input type="file" id="fileInput" />
-      <input type="text" id="userInput" placeholder="무엇이든 물어보세요" onkeydown="handleKey(event)" />
       <button id="sendBtn" onclick="sendMessage()">보내기</button>
     </div>
   </div>
 
   <script>
-    async function sendMessage() {
-      const input = document.getElementById("userInput");
-      const chatBox = document.getElementById("chatBox");
-      const message = input.value.trim();
-      const file = document.getElementById("fileInput").files[0];
+    const input = document.getElementById("userInput");
+    const chatBox = document.getElementById("chatBox");
+    const fileInput = document.getElementById("fileInput");
 
-      if (!message && !file) return;
-
-      if (message) {
-        const userDiv = document.createElement("div");
-        userDiv.className = "message user";
-        userDiv.innerText = message;
-        chatBox.appendChild(userDiv);
-      }
-
-      const gptDiv = document.createElement("div");
-      gptDiv.className = "message gpt";
-      gptDiv.innerText = "GPT가 응답 중입니다...";
-      chatBox.appendChild(gptDiv);
-
-      input.value = "";
-      chatBox.scrollTop = chatBox.scrollHeight;
-
-      const formData = new FormData();
-      if (message) formData.append("message", message);
-      if (file) formData.append("file", file);
-
-      try {
-        const response = await fetch("/chat", {
-          method: "POST",
-          body: formData
-        });
-        const data = await response.json();
-        gptDiv.innerText = data.reply;
-      } catch (err) {
-        gptDiv.innerText = "GPT 오류 발생: " + err.message;
-      }
-
-      chatBox.scrollTop = chatBox.scrollHeight;
-    }
-
-    function handleKey(e) {
+    input.addEventListener("keydown", function (e) {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         sendMessage();
       }
+    });
+
+    async function sendMessage() {
+      const message = input.value.trim();
+      const file = fileInput.files[0];
+
+      if (!message && !file) return;
+
+      const userDiv = document.createElement("div");
+      userDiv.className = "message user";
+      userDiv.innerText = message || `[파일 업로드: ${file.name}]`;
+      chatBox.appendChild(userDiv);
+
+      const loadingDiv = document.createElement("div");
+      loadingDiv.className = "message gpt";
+      loadingDiv.innerText = "GPT가 응답 중입니다...";
+      chatBox.appendChild(loadingDiv);
+
+      const formData = new FormData();
+      formData.append("message", message);
+      if (file) {
+        formData.append("file", file);
+      }
+
+      try {
+        const response = await fetch("/chat", {
+          method: "POST",
+          body: formData,
+        });
+        const data = await response.json();
+        loadingDiv.innerText = "GPT: " + data.reply;
+      } catch (err) {
+        loadingDiv.innerText = "GPT 오류 발생: " + err.message;
+      }
+
+      input.value = "";
+      fileInput.value = null;
+      chatBox.scrollTop = chatBox.scrollHeight;
     }
   </script>
 </body>
