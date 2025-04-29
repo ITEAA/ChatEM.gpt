@@ -1,15 +1,66 @@
 from flask import Flask, request, jsonify, render_template
 import time
-from openai import OpenAI
-from dotenv import load_dotenv
 import os
+import requests
+from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv()
 client = OpenAI()
 
 app = Flask(__name__)
 
-assistant_id = "asst_WW6opruOKAP1tdK7NAHvD6Yk"  # 실제 assistant ID 사용
+# 🛠 Assistant 생성 (functions 등록 포함)
+functions = [
+    {
+        "name": "search_corporation",
+        "description": "기업 이름으로 기업 정보를 조회합니다.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "corpNm": {
+                    "type": "string",
+                    "description": "조회할 기업 이름 (예: 삼성전자)",
+                },
+            },
+            "required": ["corpNm"],
+        },
+    }
+]
+
+with open("prompt.txt", "r", encoding="utf-8") as f:
+    system_prompt = f.read()
+
+assistant = client.beta.assistants.create(
+    name="기업 추천 챗봇",
+    instructions=system_prompt,
+    model="gpt-4-1106-preview",
+    tools=[{"type": "function", "function": func} for func in functions]
+)
+
+assistant_id = assistant.id  # 새로 만든 assistant의 id 사용
+
+# 🛠 기업 검색 함수
+def search_corporation(corpNm):
+    api_url = "https://corp-api-rho.vercel.app/corp"
+    service_key = "ZqDMcB9z2xwM8pqNALpRI0Dy4jqugWQPfSBFwEWeOe6GXmHv/JOjl0xmZKTME66FX/SOUwK9vjShZ7ms04STmA=="
+    params = {
+        "pageNo": 1,
+        "numOfRows": 10,
+        "resultType": "json",
+        "corpNm": corpNm,
+        "serviceKey": service_key
+    }
+    response = requests.get(api_url, params=params)
+    if response.status_code == 200:
+        data = response.json()
+        items = data.get("response", {}).get("body", {}).get("items", [])
+        if items:
+            return f"🔎 기업 검색 결과: {items[0]['corpNm']} (ID: {items[0]['corpId']})"
+        else:
+            return "❌ 기업 정보를 찾을 수 없습니다."
+    else:
+        return "❌ API 호출 실패"
 
 @app.route("/")
 def index():
@@ -19,12 +70,6 @@ def index():
 def chat():
     try:
         user_message = request.form.get("message", "")
-        uploaded_file = request.files.get("file")
-
-        if uploaded_file:
-            print(f"📁 파일 업로드됨: {uploaded_file.filename}")
-            file_content = uploaded_file.read().decode("utf-8", errors="ignore")
-            user_message += f"\n\n[첨부 파일 내용 요약]:\n{file_content[:1000]}"
 
         thread = client.beta.threads.create()
 
@@ -39,23 +84,7 @@ def chat():
             assistant_id=assistant_id
         )
 
+        # Run 대기
         while run.status not in ["completed", "failed", "cancelled"]:
             time.sleep(1)
-            run = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
-
-        messages = client.beta.threads.messages.list(thread_id=thread.id, order="desc")
-
-        for msg in messages.data:
-            for content in msg.content:
-                if content.type == "text":
-                    return jsonify(reply=content.text.value)
-
-        return jsonify(reply="GPT 응답 없음")
-
-    except Exception as e:
-        print("❌ 서버 에러:", str(e))
-        return jsonify(reply="서버 오류 발생: " + str(e)), 500
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+            run = client.beta.threads.runs
