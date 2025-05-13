@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, render_template, session
 import time
 import requests
 import os
+import re
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -9,33 +10,65 @@ load_dotenv()
 client = OpenAI()
 
 app = Flask(__name__)
-app.secret_key = "your-secret-key"  # 세션 사용을 위해 필요
+app.secret_key = "your-secret-key"
 
 assistant_id = os.getenv("ASSISTANT_ID")
 api_key = os.getenv("SERVICE_KEY")
 
-# 기업 검색 함수 (간단한 예시)
-def search_corporation(corp_name):
-    try:
-        url = "https://corp-api-rho.vercel.app/corp"
-        params = {
-            "pageNo": 1,
-            "numOfRows": 1,
-            "resultType": "json",
-            "corpNm": corp_name,
-            "serviceKey": api_key
-        }
-        response = requests.get(url, params=params)
-        if response.status_code == 200:
-            items = response.json().get("response", {}).get("body", {}).get("items", [])
-            if items:
-                return f"기업명: {items[0]['corpNm']} / 기업ID: {items[0]['corpId']}"
-            else:
-                return "해당 기업 정보를 찾을 수 없습니다."
-        else:
-            return f"API 오류: {response.status_code}"
-    except Exception as e:
-        return f"API 호출 예외 발생: {str(e)}"
+# 1. 자소서 키워드 추출 (GPT)
+def extract_keywords_from_resume(text):
+    prompt = f"""
+    다음 이력서에서 핵심 기술, 직무, 경험 키워드만 쉼표로 구분하여 추출해줘.
+    결과는 키워드 리스트로만 짧게 출력해줘.
+
+    이력서 내용:
+    {text}
+    """
+    response = client.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3
+    )
+    return [kw.strip() for kw in response.choices[0].message.content.split(",")]
+
+# 2. 선호도 파싱 (1. ~ 4. 형태)
+def parse_user_preferences(text):
+    prefs = re.findall(r"\d+\.\s*([^\n]*)", text)
+    return [p.strip() for p in prefs]
+
+# 3. 기업 리스트 예시 (실제는 API나 DB 사용)
+def load_company_data():
+    return [
+        {"name": "삼성 SDS", "tags": ["AI", "서울", "대기업", "Python", "데이터 분석"]},
+        {"name": "카카오", "tags": ["백엔드", "머신러닝", "수도권", "스타트업"]},
+        {"name": "LG CNS", "tags": ["프론트엔드", "AI", "서울", "대기업", "JavaScript"]},
+    ]
+
+# 4. 키워드 기반 기업 매칭
+def match_company_to_user(companies, user_keywords, user_prefs):
+    best = None
+    best_score = -1
+    for company in companies:
+        overlap = set(user_keywords + user_prefs) & set(company["tags"])
+        score = len(overlap)
+        if score > best_score:
+            best = company
+            best_score = score
+    return best
+
+# 5. GPT 설명 프롬프트 생성
+def build_explanation_prompt(keywords, preferences, company):
+    return f"""
+    다음 사용자 정보와 추천 기업을 기반으로, 왜 이 기업이 적합한지 2~3문장으로 설명해주세요.
+
+    [사용자 정보]
+    - 기술 키워드: {', '.join(keywords)}
+    - 선호: {', '.join(preferences)}
+
+    [추천 기업]
+    - 기업명: {company['name']}
+    - 태그: {', '.join(company['tags'])}
+    """
 
 @app.route("/")
 def index():
@@ -47,54 +80,52 @@ def chat():
         user_message = request.form.get("message", "").strip()
         uploaded_file = request.files.get("file")
 
-        if uploaded_file:
-            file_content = uploaded_file.read().decode("utf-8", errors="ignore")
-            user_message += f"\n\n[첨부 파일 내용 요약]:\n{file_content[:1000]}"
+        if not uploaded_file or not user_message:
+            return jsonify(reply="자기소개서와 선호도 입력이 모두 필요합니다.")
 
-        # 기업명 검색 요청 감지
-        if "채용공고" in user_message:
-            for word in user_message.split():
-                if word.endswith("채용공고"):
-                    corp_name = word.replace("채용공고", "").strip()
-                    if corp_name:
-                        corp_info = search_corporation(corp_name)
-                        user_message += f"\n\n[기업 검색 결과]:\n{corp_info}"
-                    break
+        # 1. 자소서에서 키워드 추출
+        file_content = uploaded_file.read().decode("utf-8", errors="ignore")
+        user_keywords = extract_keywords_from_resume(file_content)
 
-        # 세션 thread_id 관리
+        # 2. 사용자 입력에서 선호도 추출
+        user_preferences = parse_user_preferences(user_message)
+
+        # 3. 기업 정보 가져오기
+        companies = load_company_data()
+
+        # 4. 기업 매칭
+        matched_company = match_company_to_user(companies, user_keywords, user_preferences)
+
+        # 5. GPT 설명 요청
+        prompt = build_explanation_prompt(user_keywords, user_preferences, matched_company)
+
+        # Thread 유지
         if "thread_id" not in session:
             thread = client.beta.threads.create()
             session["thread_id"] = thread.id
         else:
             thread = client.beta.threads.retrieve(session["thread_id"])
 
-        # 메시지 보내기
         client.beta.threads.messages.create(
             thread_id=thread.id,
             role="user",
-            content=user_message
+            content=prompt
         )
 
-        # GPT Assistant 실행
         run = client.beta.threads.runs.create(
             thread_id=thread.id,
             assistant_id=assistant_id
         )
 
-        # ⏳ 타임아웃 처리
-        timeout = 30  # 최대 30초
+        timeout = 30
         start_time = time.time()
-
         while run.status not in ["completed", "failed", "cancelled"]:
             time.sleep(1)
             run = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
-
             if time.time() - start_time > timeout:
                 return jsonify(reply="GPT 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요.")
 
-        # 응답 메시지 추출
         messages = client.beta.threads.messages.list(thread_id=thread.id, order="desc")
-
         for msg in messages.data:
             for content in msg.content:
                 if content.type == "text":
@@ -104,7 +135,7 @@ def chat():
 
     except Exception as e:
         print("❌ 서버 에러:", str(e))
-        return jsonify(reply="서버 오류가 발생했습니다: " + str(e)), 500
+        return jsonify(reply="서버 오류 발생: " + str(e)), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
