@@ -121,16 +121,19 @@
 
       if (!message && !file) return;
 
+      // 사용자 메시지 출력
       const userDiv = document.createElement("div");
       userDiv.className = "message user";
-      userDiv.innerText = message || `[파일 업로드: ${file.name}]`;
+      userDiv.innerText = message || `[이력서/자기소개서 업로드됨: ${file.name}]`;
       chatBox.appendChild(userDiv);
 
+      // GPT 응답 로딩 메시지
       const loadingDiv = document.createElement("div");
       loadingDiv.className = "message gpt";
-      loadingDiv.innerText = "GPT가 응답 중입니다...";
+      loadingDiv.innerText = "분석 중입니다. 잠시만 기다려주세요...";
       chatBox.appendChild(loadingDiv);
 
+      // 서버에 메시지와 파일 전송
       const formData = new FormData();
       formData.append("message", message);
       if (file) {
@@ -143,13 +146,17 @@
           body: formData,
         });
         const data = await response.json();
-        loadingDiv.innerText = "GPT: " + data.reply;
+        loadingDiv.innerText = data.reply;
       } catch (err) {
-        loadingDiv.innerText = "GPT 오류 발생: " + err.message;
+        loadingDiv.innerText = "오류가 발생했습니다: " + err.message;
       }
 
+      // 입력 초기화 및 포커스 복원
       input.value = "";
       fileInput.value = null;
+      input.focus();
+
+      // 스크롤 최하단으로 이동
       chatBox.scrollTop = chatBox.scrollHeight;
     }
   </script>
