@@ -3,11 +3,9 @@ import requests
 import os
 
 app = Flask(__name__)
-
-# 환경변수에서 인증키 가져오기 (.env에서 읽히는 전제)
 job_api_key = os.getenv("JOB_API_KEY")
 
-@app.route("/test-api")
+@app.route("/")  # ✅ 루트 URL에서 실행되도록 수정
 def test_api():
     url = "https://job.kosmes.or.kr/openApi/interestedJob/openApiJopblancList.do"
     params = {
