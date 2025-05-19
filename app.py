@@ -11,7 +11,6 @@ client = OpenAI()
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY")
-
 assistant_id = os.getenv("ASSISTANT_ID")
 job_api_key = os.getenv("JOB_API_KEY")
 
@@ -55,6 +54,15 @@ def build_company_list_from_job_api(keyword="AI", rows=50):
             }
             companies.append(company)
     return companies
+
+
+def build_company_list_with_fallback(keywords, rows=50):
+    for keyword in keywords:
+        companies = build_company_list_from_job_api(keyword=keyword, rows=rows)
+        if companies:
+            return companies
+    # fallback to 전체 검색
+    return build_company_list_from_job_api(keyword="", rows=rows)
 
 
 def match_company_to_user(companies, user_keywords, user_prefs):
@@ -123,10 +131,11 @@ def chat():
             user_keywords = extract_keywords_from_resume(resume_text)
             user_preferences = parse_user_preferences(user_message)
 
-            companies = build_company_list_from_job_api(keyword=user_keywords[0] if user_keywords else "AI")
+            companies = build_company_list_with_fallback(user_keywords)
+
             matched_company = match_company_to_user(companies, user_keywords, user_preferences)
 
-            job_postings = get_job_postings(matched_company["tags"][0])
+            job_postings = get_job_postings(matched_company["tags"][0] if matched_company["tags"] else "AI")
             job_summary = ""
             for job in job_postings:
                 job_summary += f"- {job['entrprsNm']} | {job['title']} | {job['regionNm']} | {job['emplmntTypeNm']}\n링크: {job['linkUrl']}\n\n"
