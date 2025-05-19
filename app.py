@@ -178,3 +178,19 @@ def chat():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
+@app.route("/api/test_job_api")
+def test_job_api():
+    url = "https://job.kosmes.or.kr/openApi/interestedJob/openApiJopblancList.do"
+    params = {
+        "serviceKey": job_api_key,
+        "searchKeyword": "AI",
+        "numOfRows": 3,
+        "pageNo": 1,
+        "returnType": "json"
+    }
+    response = requests.get(url, params=params)
+    return jsonify({
+        "status": response.status_code,
+        "data": response.json() if response.status_code == 200 else response.text
+    })
