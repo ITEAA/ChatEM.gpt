@@ -10,7 +10,7 @@ load_dotenv()
 client = OpenAI()
 
 app = Flask(__name__)
-app.secret_key = "your-secret-key"
+app.secret_key = os.getenv("FLASK_SECRET_KEY")
 
 assistant_id = os.getenv("ASSISTANT_ID")
 job_api_key = "fYL5gLDcPZ/iE6TB7Rmg1AnxisbHUUFMUuK8Am/MxcIC5+G2awO4kGH6CjFbgwAorXjRlhuqogcHGSEyLzQXdoOW2XonGbNFkASwL8QBm6FkiXgC/hHz+Jr/HAInzOPG"
