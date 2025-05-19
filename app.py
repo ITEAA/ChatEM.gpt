@@ -13,9 +13,8 @@ app = Flask(__name__)
 app.secret_key = "your-secret-key"
 
 assistant_id = os.getenv("ASSISTANT_ID")
-api_key = os.getenv("SERVICE_KEY")
+job_api_key = "fYL5gLDcPZ/iE6TB7Rmg1AnxisbHUUFMUuK8Am/MxcIC5+G2awO4kGH6CjFbgwAorXjRlhuqogcHGSEyLzQXdoOW2XonGbNFkASwL8QBm6FkiXgC/hHz+Jr/HAInzOPG"
 
-# 1. 자소서 키워드 추출 (GPT)
 def extract_keywords_from_resume(text):
     prompt = f"""
     다음 이력서에서 핵심 기술, 직무, 경험 키워드만 쉼표로 구분하여 추출해줘.
@@ -31,20 +30,36 @@ def extract_keywords_from_resume(text):
     )
     return [kw.strip() for kw in response.choices[0].message.content.split(",")]
 
-# 2. 선호도 파싱 (1. ~ 4. 형태)
 def parse_user_preferences(text):
     prefs = re.findall(r"\d+\.\s*([^\n]*)", text)
     return [p.strip() for p in prefs]
 
-# 3. 기업 리스트 예시 (실제는 API나 DB 사용)
-def load_company_data():
-    return [
-        {"name": "삼성 SDS", "tags": ["AI", "서울", "대기업", "Python", "데이터 분석"]},
-        {"name": "카카오", "tags": ["백엔드", "머신러닝", "수도권", "스타트업"]},
-        {"name": "LG CNS", "tags": ["프론트엔드", "AI", "서울", "대기업", "JavaScript"]},
-    ]
+def build_company_list_from_job_api(keyword="AI", rows=50):
+    url = "https://job.kosmes.or.kr/openApi/interestedJob/openApiJopblancList.do"
+    params = {
+        "serviceKey": job_api_key,
+        "searchKeyword": keyword,
+        "numOfRows": rows,
+        "pageNo": 1,
+        "returnType": "json"
+    }
+    response = requests.get(url, params=params)
+    companies = []
+    if response.status_code == 200:
+        postings = response.json().get("data", [])
+        for post in postings:
+            tags = [
+                post.get("rcritFieldNm", ""),
+                post.get("regionNm", ""),
+                post.get("emplmntTypeNm", "")
+            ]
+            company = {
+                "name": post.get("entrprsNm", "기업명 없음"),
+                "tags": [tag.strip() for tag in tags if tag.strip()]
+            }
+            companies.append(company)
+    return companies
 
-# 4. 키워드 기반 기업 매칭
 def match_company_to_user(companies, user_keywords, user_prefs):
     best = None
     best_score = -1
@@ -56,9 +71,8 @@ def match_company_to_user(companies, user_keywords, user_prefs):
             best_score = score
     return best
 
-# 5. GPT 설명 프롬프트 생성
-def build_explanation_prompt(keywords, preferences, company):
-    return f"""
+def build_explanation_prompt(keywords, preferences, company, job_summary=""):
+    base = f"""
     다음 사용자 정보와 추천 기업을 기반으로, 왜 이 기업이 적합한지 2~3문장으로 설명해주세요.
 
     [사용자 정보]
@@ -69,6 +83,23 @@ def build_explanation_prompt(keywords, preferences, company):
     - 기업명: {company['name']}
     - 태그: {', '.join(company['tags'])}
     """
+    if job_summary:
+        base += f"\n\n[관련 채용공고]\n{job_summary}"
+    return base
+
+def get_job_postings(keyword="AI", page=1, rows=3):
+    url = "https://job.kosmes.or.kr/openApi/interestedJob/openApiJopblancList.do"
+    params = {
+        "serviceKey": job_api_key,
+        "searchKeyword": keyword,
+        "numOfRows": rows,
+        "pageNo": page,
+        "returnType": "json"
+    }
+    response = requests.get(url, params=params)
+    if response.status_code == 200:
+        return response.json().get("data", [])
+    return []
 
 @app.route("/")
 def index():
@@ -83,23 +114,20 @@ def chat():
         if not uploaded_file or not user_message:
             return jsonify(reply="자기소개서와 선호도 입력이 모두 필요합니다.")
 
-        # 1. 자소서에서 키워드 추출
         file_content = uploaded_file.read().decode("utf-8", errors="ignore")
         user_keywords = extract_keywords_from_resume(file_content)
-
-        # 2. 사용자 입력에서 선호도 추출
         user_preferences = parse_user_preferences(user_message)
 
-        # 3. 기업 정보 가져오기
-        companies = load_company_data()
-
-        # 4. 기업 매칭
+        companies = build_company_list_from_job_api(keyword=user_keywords[0] if user_keywords else "AI")
         matched_company = match_company_to_user(companies, user_keywords, user_preferences)
 
-        # 5. GPT 설명 요청
-        prompt = build_explanation_prompt(user_keywords, user_preferences, matched_company)
+        job_postings = get_job_postings(matched_company["tags"][0])
+        job_summary = ""
+        for job in job_postings:
+            job_summary += f"- {job['entrprsNm']} | {job['title']} | {job['regionNm']} | {job['emplmntTypeNm']}\n링크: {job['linkUrl']}\n\n"
 
-        # Thread 유지
+        prompt = build_explanation_prompt(user_keywords, user_preferences, matched_company, job_summary)
+
         if "thread_id" not in session:
             thread = client.beta.threads.create()
             session["thread_id"] = thread.id
