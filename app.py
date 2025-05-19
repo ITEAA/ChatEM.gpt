@@ -7,7 +7,7 @@ job_api_key = os.getenv("JOB_API_KEY")
 
 @app.route("/")  # ✅ 루트 URL에서 실행되도록 수정
 def test_api():
-    url = https://118.67.151.173/data/api/jopblancApi.do
+    url = "https://118.67.151.173/data/api/jopblancApi.do"
     params = {
         "serviceKey": job_api_key,
         "searchKeyword": "AI",
