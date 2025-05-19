@@ -13,26 +13,23 @@ app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY")
 
 assistant_id = os.getenv("ASSISTANT_ID")
-job_api_key = "fYL5gLDcPZ/iE6TB7Rmg1AnxisbHUUFMUuK8Am/MxcIC5+G2awO4kGH6CjFbgwAorXjRlhuqogcHGSEyLzQXdoOW2XonGbNFkASwL8QBm6FkiXgC/hHz+Jr/HAInzOPG"
+job_api_key = os.getenv("JOB_API_KEY")
+
 
 def extract_keywords_from_resume(text):
-    prompt = f"""
-    다음 이력서에서 핵심 기술, 직무, 경험 키워드만 쉼표로 구분하여 추출해줘.
-    결과는 키워드 리스트로만 짧게 출력해줘.
-
-    이력서 내용:
-    {text}
-    """
+    prompt = f"다음 자기소개서에서 핵심 기술, 직무, 경험 키워드를 쉼표로 추출해줘:\n{text}"
     response = client.chat.completions.create(
-        model="gpt-4-1106-preview",
+        model="gpt-4",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3
     )
     return [kw.strip() for kw in response.choices[0].message.content.split(",")]
 
+
 def parse_user_preferences(text):
     prefs = re.findall(r"\d+\.\s*([^\n]*)", text)
     return [p.strip() for p in prefs]
+
 
 def build_company_list_from_job_api(keyword="AI", rows=50):
     url = "https://job.kosmes.or.kr/openApi/interestedJob/openApiJopblancList.do"
@@ -48,17 +45,14 @@ def build_company_list_from_job_api(keyword="AI", rows=50):
     if response.status_code == 200:
         postings = response.json().get("data", [])
         for post in postings:
-            tags = [
-                post.get("rcritFieldNm", ""),
-                post.get("regionNm", ""),
-                post.get("emplmntTypeNm", "")
-            ]
+            tags = [post.get("rcritFieldNm", ""), post.get("regionNm", ""), post.get("emplmntTypeNm", "")]
             company = {
                 "name": post.get("entrprsNm", "기업명 없음"),
-                "tags": [tag.strip() for tag in tags if tag.strip()]
+                "tags": [t.strip() for t in tags if t.strip()]
             }
             companies.append(company)
     return companies
+
 
 def match_company_to_user(companies, user_keywords, user_prefs):
     best = None
@@ -71,29 +65,23 @@ def match_company_to_user(companies, user_keywords, user_prefs):
             best_score = score
     return best
 
+
 def build_explanation_prompt(keywords, preferences, company, job_summary=""):
-    base = f"""
-    다음 사용자 정보와 추천 기업을 기반으로, 왜 이 기업이 적합한지 2~3문장으로 설명해주세요.
-
-    [사용자 정보]
-    - 기술 키워드: {', '.join(keywords)}
-    - 선호: {', '.join(preferences)}
-
-    [추천 기업]
-    - 기업명: {company['name']}
-    - 태그: {', '.join(company['tags'])}
-    """
+    base = f"다음 사용자 정보와 추천 기업을 기반으로, 왜 이 기업이 적합한지 설명해주세요.\n\n"
+    base += f"[사용자 정보]\n- 키워드: {', '.join(keywords)}\n- 선호: {', '.join(preferences)}\n\n"
+    base += f"[추천 기업]\n- 기업명: {company['name']}\n- 태그: {', '.join(company['tags'])}"
     if job_summary:
-        base += f"\n\n[관련 채용공고]\n{job_summary}"
+        base += f"\n\n[채용공고]\n{job_summary}"
     return base
 
-def get_job_postings(keyword="AI", page=1, rows=3):
+
+def get_job_postings(keyword="AI", rows=3):
     url = "https://job.kosmes.or.kr/openApi/interestedJob/openApiJopblancList.do"
     params = {
         "serviceKey": job_api_key,
         "searchKeyword": keyword,
         "numOfRows": rows,
-        "pageNo": page,
+        "pageNo": 1,
         "returnType": "json"
     }
     response = requests.get(url, params=params)
@@ -101,79 +89,76 @@ def get_job_postings(keyword="AI", page=1, rows=3):
         return response.json().get("data", [])
     return []
 
+
 @app.route("/")
 def index():
+    session.clear()
+    session["stage"] = "awaiting_resume"
     return render_template("index.html")
+
 
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
-        uploaded_file = request.files.get("file")
         user_message = request.form.get("message", "").strip()
-        
-        # 자소서 텍스트 여부 판단
-        is_resume_text = any(kw in user_message for kw in ["자기소개서", "이력서"])
-        
-        # 파일도 없고 텍스트도 없으면 중단
-        if not uploaded_file and not is_resume_text:
-            return jsonify(reply="자기소개서 파일 또는 관련 내용을 함께 입력해 주세요.")
-        
-        # 자소서 내용 처리
-        if uploaded_file:
-            file_content = uploaded_file.read().decode("utf-8", errors="ignore")
-        else:
-            file_content = user_message  # 텍스트 기반 자소서로 간주
+        stage = session.get("stage", "awaiting_resume")
 
-        file_content = uploaded_file.read().decode("utf-8", errors="ignore")
-        user_keywords = extract_keywords_from_resume(file_content)
-        user_preferences = parse_user_preferences(user_message)
+        if stage == "awaiting_resume":
+            session["resume"] = user_message
+            session["stage"] = "awaiting_preference"
+            return jsonify(reply=(
+                "자기소개서를 잘 받았습니다 😊\n"
+                "이제 선호도를 알려주세요:\n"
+                "1. 어떤 산업이나 분야에 관심이 있으신가요?\n"
+                "2. 선호하는 면접 방식이나 고려사항이 있으신가요?\n"
+                "3. 선호 지역은 어디인가요? (예: 서울, 부산, 재택)\n"
+                "4. 기업 규모에 대한 선호가 있으신가요? (예: 스타트업, 대기업)"
+            ))
 
-        companies = build_company_list_from_job_api(keyword=user_keywords[0] if user_keywords else "AI")
-        matched_company = match_company_to_user(companies, user_keywords, user_preferences)
+        elif stage == "awaiting_preference":
+            resume_text = session.get("resume", "")
+            user_keywords = extract_keywords_from_resume(resume_text)
+            user_preferences = parse_user_preferences(user_message)
 
-        job_postings = get_job_postings(matched_company["tags"][0])
-        job_summary = ""
-        for job in job_postings:
-            job_summary += f"- {job['entrprsNm']} | {job['title']} | {job['regionNm']} | {job['emplmntTypeNm']}\n링크: {job['linkUrl']}\n\n"
+            companies = build_company_list_from_job_api(keyword=user_keywords[0] if user_keywords else "AI")
+            matched_company = match_company_to_user(companies, user_keywords, user_preferences)
 
-        prompt = build_explanation_prompt(user_keywords, user_preferences, matched_company, job_summary)
+            job_postings = get_job_postings(matched_company["tags"][0])
+            job_summary = ""
+            for job in job_postings:
+                job_summary += f"- {job['entrprsNm']} | {job['title']} | {job['regionNm']} | {job['emplmntTypeNm']}\n링크: {job['linkUrl']}\n\n"
 
-        if "thread_id" not in session:
+            prompt = build_explanation_prompt(user_keywords, user_preferences, matched_company, job_summary)
+
             thread = client.beta.threads.create()
-            session["thread_id"] = thread.id
+            client.beta.threads.messages.create(thread_id=thread.id, role="user", content=prompt)
+            run = client.beta.threads.runs.create(thread_id=thread.id, assistant_id=assistant_id)
+
+            timeout = 30
+            start_time = time.time()
+            while run.status not in ["completed", "failed", "cancelled"]:
+                time.sleep(1)
+                run = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
+                if time.time() - start_time > timeout:
+                    return jsonify(reply="GPT 응답이 지연되고 있어요. 잠시 후 다시 시도해주세요.")
+
+            messages = client.beta.threads.messages.list(thread_id=thread.id, order="desc")
+            session["stage"] = "complete"
+
+            for msg in messages.data:
+                for content in msg.content:
+                    if content.type == "text":
+                        return jsonify(reply=content.text.value)
+
+            return jsonify(reply="GPT로부터 응답을 받지 못했습니다.")
+
         else:
-            thread = client.beta.threads.retrieve(session["thread_id"])
-
-        client.beta.threads.messages.create(
-            thread_id=thread.id,
-            role="user",
-            content=prompt
-        )
-
-        run = client.beta.threads.runs.create(
-            thread_id=thread.id,
-            assistant_id=assistant_id
-        )
-
-        timeout = 30
-        start_time = time.time()
-        while run.status not in ["completed", "failed", "cancelled"]:
-            time.sleep(1)
-            run = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
-            if time.time() - start_time > timeout:
-                return jsonify(reply="GPT 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요.")
-
-        messages = client.beta.threads.messages.list(thread_id=thread.id, order="desc")
-        for msg in messages.data:
-            for content in msg.content:
-                if content.type == "text":
-                    return jsonify(reply=content.text.value)
-
-        return jsonify(reply="GPT로부터 응답을 받지 못했습니다.")
+            return jsonify(reply="처음부터 다시 시작하시려면 '처음부터'라고 입력해주세요.")
 
     except Exception as e:
-        print("❌ 서버 에러:", str(e))
+        print("❌ 에러:", str(e))
         return jsonify(reply="서버 오류 발생: " + str(e)), 500
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
