@@ -108,15 +108,21 @@ def index():
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
-        user_message = request.form.get("message", "").strip()
         uploaded_file = request.files.get("file")
-
-        # 사용자 메시지에 "자기소개서", "이력서" 등 포함 여부 확인
-        is_resume_text = any(kw in user_message for kw in ["자기소개서", "이력서", "이력서입니다", "자기소개서입니다"])
+        user_message = request.form.get("message", "").strip()
         
-        # 파일도 없고 텍스트도 없으면 차단
+        # 자소서 텍스트 여부 판단
+        is_resume_text = any(kw in user_message for kw in ["자기소개서", "이력서"])
+        
+        # 파일도 없고 텍스트도 없으면 중단
         if not uploaded_file and not is_resume_text:
             return jsonify(reply="자기소개서 파일 또는 관련 내용을 함께 입력해 주세요.")
+        
+        # 자소서 내용 처리
+        if uploaded_file:
+            file_content = uploaded_file.read().decode("utf-8", errors="ignore")
+        else:
+            file_content = user_message  # 텍스트 기반 자소서로 간주
 
         file_content = uploaded_file.read().decode("utf-8", errors="ignore")
         user_keywords = extract_keywords_from_resume(file_content)
