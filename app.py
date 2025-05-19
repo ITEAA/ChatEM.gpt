@@ -24,7 +24,7 @@ def extract_keywords_from_resume(text):
     {text}
     """
     response = client.chat.completions.create(
-        model="gpt-4",
+        model="gpt-4-1106-preview",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3
     )
