@@ -30,7 +30,7 @@ def parse_user_preferences(text):
     return [p.strip() for p in prefs]
 
 
-def build_company_list_from_job_api(keyword="AI", rows=50):
+def build_company_list_from_job_api(keyword, rows=50):
     url = "https://job.kosmes.or.kr/openApi/interestedJob/openApiJopblancList.do"
     params = {
         "serviceKey": job_api_key,
@@ -56,15 +56,6 @@ def build_company_list_from_job_api(keyword="AI", rows=50):
     return companies
 
 
-def build_company_list_with_fallback(keywords, rows=50):
-    for keyword in keywords:
-        companies = build_company_list_from_job_api(keyword=keyword, rows=rows)
-        if companies:
-            return companies
-    # fallback to 전체 검색
-    return build_company_list_from_job_api(keyword="", rows=rows)
-
-
 def match_company_to_user(companies, user_keywords, user_prefs):
     best = None
     best_score = -1
@@ -74,7 +65,7 @@ def match_company_to_user(companies, user_keywords, user_prefs):
         if score > best_score:
             best = company
             best_score = score
-    return best
+    return best or (companies[0] if companies else None)
 
 
 def build_explanation_prompt(keywords, preferences, company, job_summary=""):
@@ -86,7 +77,7 @@ def build_explanation_prompt(keywords, preferences, company, job_summary=""):
     return base
 
 
-def get_job_postings(keyword="AI", rows=3):
+def get_job_postings(keyword, rows=3):
     url = "https://job.kosmes.or.kr/openApi/interestedJob/openApiJopblancList.do"
     params = {
         "serviceKey": job_api_key,
@@ -131,11 +122,23 @@ def chat():
             user_keywords = extract_keywords_from_resume(resume_text)
             user_preferences = parse_user_preferences(user_message)
 
-            companies = build_company_list_with_fallback(user_keywords)
+            companies = []
+            for keyword in user_keywords:
+                companies = build_company_list_from_job_api(keyword)
+                if companies:
+                    break
+            if not companies:
+                companies = build_company_list_from_job_api(keyword="")
 
             matched_company = match_company_to_user(companies, user_keywords, user_preferences)
 
-            job_postings = get_job_postings(matched_company["tags"][0] if matched_company["tags"] else "AI")
+            if not matched_company:
+                return jsonify(reply="죄송합니다. 추천 가능한 기업이 없습니다.")
+
+            # 안전하게 tags 사용
+            search_tag = matched_company["tags"][0] if matched_company.get("tags") and matched_company["tags"] else user_keywords[0]
+            job_postings = get_job_postings(search_tag)
+
             job_summary = ""
             for job in job_postings:
                 job_summary += f"- {job['entrprsNm']} | {job['title']} | {job['regionNm']} | {job['emplmntTypeNm']}\n링크: {job['linkUrl']}\n\n"
