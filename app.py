@@ -19,7 +19,7 @@ job_api_key = os.getenv("JOB_API_KEY")
 def extract_keywords_from_resume(text):
     prompt = f"다음 자기소개서에서 핵심 기술, 직무, 경험 키워드를 쉼표로 추출해줘:\n{text}"
     response = client.chat.completions.create(
-        model="gpt-4",
+        model="gpt-4-1106-preview",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3
     )
@@ -41,6 +41,9 @@ def build_company_list_from_job_api(keyword="AI", rows=50):
         "returnType": "json"
     }
     response = requests.get(url, params=params)
+    print("📡 API 요청 URL:", response.url)
+    print("🔍 응답 상태 코드:", response.status_code)
+    print("📦 응답 내용:", response.text[:1000])
     companies = []
     if response.status_code == 200:
         postings = response.json().get("data", [])
