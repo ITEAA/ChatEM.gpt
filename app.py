@@ -3,6 +3,7 @@ import time
 import requests
 import os
 import re
+import xml.etree.ElementTree as ET
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -30,30 +31,61 @@ def parse_user_preferences(text):
     return [p.strip() for p in prefs]
 
 
-def build_company_list_from_job_api(keyword, rows=50):
-    url = "https://job.kosmes.or.kr/openApi/interestedJob/openApiJopblancList.do"
+def build_company_list_from_job_api(keyword, rows=10):
+    url = "https://118.67.151.173/data/api/jopblancApi.do"
     params = {
-        "serviceKey": job_api_key,
-        "searchKeyword": keyword,
-        "numOfRows": rows,
-        "pageNo": 1,
-        "returnType": "json"
+        "authKey": job_api_key,
+        "callTp": "L",
+        "listCount": rows,
+        "query": keyword
     }
-    response = requests.get(url, params=params)
-    print("📡 API 요청 URL:", response.url)
-    print("🔍 응답 상태 코드:", response.status_code)
-    print("📦 응답 내용:", response.text[:1000])
-    companies = []
-    if response.status_code == 200:
-        postings = response.json().get("data", [])
-        for post in postings:
-            tags = [post.get("rcritFieldNm", ""), post.get("regionNm", ""), post.get("emplmntTypeNm", "")]
-            company = {
-                "name": post.get("entrprsNm", "기업명 없음"),
-                "tags": [t.strip() for t in tags if t.strip()]
-            }
-            companies.append(company)
-    return companies
+    try:
+        response = requests.get(url, params=params, verify=False, timeout=10)
+        print("📡 API 요청 URL:", response.url)
+        print("🔍 응답 상태 코드:", response.status_code)
+
+        companies = []
+        if response.status_code == 200:
+            root = ET.fromstring(response.content)
+            for item in root.findall(".//jobList"):
+                name = item.findtext("entrprsNm", "기업명 없음")
+                area = item.findtext("areaStr", "")
+                style = item.findtext("emplymStleSeStr", "")
+                duty = item.findtext("dtyStr", "")
+                tags = [t for t in [area, style, duty] if t]
+                companies.append({"name": name, "tags": tags})
+        return companies
+
+    except Exception as e:
+        print("❌ API 요청 오류:", str(e))
+        return []
+
+
+def get_job_postings(keyword, rows=3):
+    url = "https://118.67.151.173/data/api/jopblancApi.do"
+    params = {
+        "authKey": job_api_key,
+        "callTp": "L",
+        "listCount": rows,
+        "query": keyword
+    }
+    try:
+        response = requests.get(url, params=params, verify=False, timeout=10)
+        postings = []
+        if response.status_code == 200:
+            root = ET.fromstring(response.content)
+            for item in root.findall(".//jobList"):
+                postings.append({
+                    "entrprsNm": item.findtext("entrprsNm", ""),
+                    "title": item.findtext("pblancSj", ""),
+                    "regionNm": item.findtext("areaStr", ""),
+                    "emplmntTypeNm": item.findtext("emplymStleSeStr", ""),
+                    "linkUrl": "https://www.job.kosmes.or.kr/job/jbd/jobDetail.do?seq=" + item.findtext("jopblancIdx", "")
+                })
+        return postings
+    except Exception as e:
+        print("❌ 채용공고 파싱 오류:", str(e))
+        return []
 
 
 def match_company_to_user(companies, user_keywords, user_prefs):
@@ -75,21 +107,6 @@ def build_explanation_prompt(keywords, preferences, company, job_summary=""):
     if job_summary:
         base += f"\n\n[채용공고]\n{job_summary}"
     return base
-
-
-def get_job_postings(keyword, rows=3):
-    url = "https://job.kosmes.or.kr/openApi/interestedJob/openApiJopblancList.do"
-    params = {
-        "serviceKey": job_api_key,
-        "searchKeyword": keyword,
-        "numOfRows": rows,
-        "pageNo": 1,
-        "returnType": "json"
-    }
-    response = requests.get(url, params=params)
-    if response.status_code == 200:
-        return response.json().get("data", [])
-    return []
 
 
 @app.route("/")
@@ -135,8 +152,7 @@ def chat():
             if not matched_company:
                 return jsonify(reply="죄송합니다. 추천 가능한 기업이 없습니다.")
 
-            # 안전하게 tags 사용
-            search_tag = matched_company["tags"][0] if matched_company.get("tags") and matched_company["tags"] else user_keywords[0]
+            search_tag = matched_company["tags"][0] if matched_company.get("tags") else user_keywords[0]
             job_postings = get_job_postings(search_tag)
 
             job_summary = ""
