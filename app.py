@@ -111,8 +111,12 @@ def chat():
         user_message = request.form.get("message", "").strip()
         uploaded_file = request.files.get("file")
 
-        if not uploaded_file or not user_message:
-            return jsonify(reply="자기소개서와 선호도 입력이 모두 필요합니다.")
+        # 사용자 메시지에 "자기소개서", "이력서" 등 포함 여부 확인
+        is_resume_text = any(kw in user_message for kw in ["자기소개서", "이력서", "이력서입니다", "자기소개서입니다"])
+        
+        # 파일도 없고 텍스트도 없으면 차단
+        if not uploaded_file and not is_resume_text:
+            return jsonify(reply="자기소개서 파일 또는 관련 내용을 함께 입력해 주세요.")
 
         file_content = uploaded_file.read().decode("utf-8", errors="ignore")
         user_keywords = extract_keywords_from_resume(file_content)
