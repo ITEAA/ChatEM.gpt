@@ -190,15 +190,6 @@ def chat():
         print("❌ 에러:", str(e))
         return jsonify(reply="서버 오류 발생: " + str(e)), 500
 
-@app.route("/my-ip")
-def my_ip():
-    import requests
-    try:
-        ip = requests.get("https://api.ipify.org").text
-        return f"🚀 현재 Render 서버의 공용 IP는: {ip}"
-    except Exception as e:
-        return f"IP 확인 실패: {e}"
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
