@@ -5,7 +5,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 url = "https://118.67.151.173/data/api/jopblancApi.do"
 params = {
-    "authKey": "여기에_인증키_붙여넣기",
+    "authKey": "fYL5gLDcPZ/iE6TB7Rmg1AnxisbHUUFMUuK8Am/MxcIC5+G2awO4kGH6CjFbgwAorXjRlhuqogcHGSEyLzQXdoOW2XonGbNFkASwL8QBm6FkiXgC/hHz+Jr/HAInzOPG",
     "callTp": "L",
     "listCount": 5,
     "query": "개발"
