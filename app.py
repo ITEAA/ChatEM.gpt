@@ -136,12 +136,11 @@ def build_explanation_prompt(keywords, preferences, company, job_summary=""):
         base += f"\n\n[채용공고]\n{job_summary}"
     return base
 
-
+@app.route("/")
+def home():
+    return jsonify({"message": "서버가 정상 작동 중입니다 🚀"})
+    
 # ✅ Fly.io 호환 포트 설정
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
-
-@app.route("/")
-def home():
-    return jsonify({"message": "서버가 정상 작동 중입니다 🚀"})
