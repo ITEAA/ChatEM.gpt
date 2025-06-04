@@ -26,37 +26,32 @@ def home():
 # 🔸 파일 또는 텍스트 메시지를 POST로 받아 GPT 응답 처리
 @app.route("/chat", methods=["POST"])
 def chat():
-    user_message = request.form.get("message", "")
-    file = request.files.get("file", None)
-
-    # 텍스트 또는 파일 기반 키워드 추출
-    input_text = ""
-    if file:
-        input_text = file.read().decode("utf-8")
-    elif user_message:
-        input_text = user_message
-
-    if not input_text:
-        return jsonify({"reply": "❌ 빈 메시지 또는 파일입니다."})
-
-    keywords = extract_keywords_from_resume(input_text)
-    user_prefs = ["창의적인 분위기", "개발 직무", "유연근무제 선호"]  # 예시 고정값
-
-    companies = build_company_list_from_job_api(keywords[0] if keywords else "개발", rows=10)
-    match = match_company_to_user(companies, keywords, user_prefs)
-
-    prompt = build_explanation_prompt(keywords, user_prefs, match)
     try:
+        user_message = request.form.get("message", "")
+        file = request.files.get("file", None)
+
+        input_text = file.read().decode("utf-8") if file else user_message
+        if not input_text:
+            return jsonify({"reply": "❌ 빈 메시지 또는 파일입니다."})
+
+        keywords = extract_keywords_from_resume(input_text)
+        user_prefs = ["창의적인 분위기", "개발 직무", "유연근무제 선호"]
+
+        companies = build_company_list_from_job_api(keywords[0] if keywords else "개발", rows=10)
+        match = match_company_to_user(companies, keywords, user_prefs)
+
+        prompt = build_explanation_prompt(keywords, user_prefs, match)
         gpt_response = client.chat.completions.create(
             model="gpt-4-1106-preview",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4
         )
         reply = gpt_response.choices[0].message.content.strip()
-    except Exception as e:
-        reply = f"❌ 추천 설명 생성 실패: {e}"
+        return jsonify({"reply": reply})
 
-    return jsonify({"reply": reply})
+    except Exception as e:
+        # 예외가 발생해도 HTML 대신 JSON으로 반환하게
+        return jsonify({"reply": f"❌ 서버 오류: {str(e)}"}), 500
 
 
 # 🔸 키워드 추출
