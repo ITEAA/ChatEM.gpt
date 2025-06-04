@@ -141,6 +141,11 @@ def match_company_to_user(companies, user_keywords, user_prefs):
 def build_explanation_prompt(keywords, preferences, company, job_summary=""):
     base = f"다음 사용자 정보와 추천 기업을 기반으로, 왜 이 기업이 적합한지 설명해주세요.\n\n"
     base += f"[사용자 정보]\n- 키워드: {', '.join(keywords)}\n- 선호: {', '.join(preferences)}\n\n"
+    
+    if company is None:
+        base += "[추천 기업 정보 없음]\n- 기업 추천에 실패했습니다."
+        return base  # 회사가 없을 때 예외 방지
+    
     base += f"[추천 기업]\n- 기업명: {company['name']}\n- 태그: {', '.join(company['tags'])}"
     if job_summary:
         base += f"\n\n[채용공고]\n{job_summary}"
