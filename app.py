@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 import time
 import requests
 import os
@@ -17,6 +17,49 @@ assistant_id = os.getenv("ASSISTANT_ID")
 job_api_key = os.getenv("JOB_API_KEY")
 
 
+# 🔸 index.html 보여주기
+@app.route("/")
+def home():
+    return render_template("index.html")
+
+
+# 🔸 파일 또는 텍스트 메시지를 POST로 받아 GPT 응답 처리
+@app.route("/chat", methods=["POST"])
+def chat():
+    user_message = request.form.get("message", "")
+    file = request.files.get("file", None)
+
+    # 텍스트 또는 파일 기반 키워드 추출
+    input_text = ""
+    if file:
+        input_text = file.read().decode("utf-8")
+    elif user_message:
+        input_text = user_message
+
+    if not input_text:
+        return jsonify({"reply": "❌ 빈 메시지 또는 파일입니다."})
+
+    keywords = extract_keywords_from_resume(input_text)
+    user_prefs = ["창의적인 분위기", "개발 직무", "유연근무제 선호"]  # 예시 고정값
+
+    companies = build_company_list_from_job_api(keywords[0] if keywords else "개발", rows=10)
+    match = match_company_to_user(companies, keywords, user_prefs)
+
+    prompt = build_explanation_prompt(keywords, user_prefs, match)
+    try:
+        gpt_response = client.chat.completions.create(
+            model="gpt-4-1106-preview",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.4
+        )
+        reply = gpt_response.choices[0].message.content.strip()
+    except Exception as e:
+        reply = f"❌ 추천 설명 생성 실패: {e}"
+
+    return jsonify({"reply": reply})
+
+
+# 🔸 키워드 추출
 def extract_keywords_from_resume(text):
     prompt = f"다음 자기소개서에서 핵심 기술, 직무, 경험 키워드를 쉼표로 추출해줘:\n{text}"
     try:
@@ -28,7 +71,7 @@ def extract_keywords_from_resume(text):
         return [kw.strip() for kw in response.choices[0].message.content.split(",")]
     except Exception as e:
         print("❌ 키워드 추출 실패:", e)
-        return ["개발", "팀워크", "문제해결"]  # fallback 키워드
+        return ["개발", "팀워크", "문제해결"]
 
 
 def parse_user_preferences(text):
@@ -60,7 +103,7 @@ def build_company_list_from_job_api(keyword, rows=10):
                 duty = item.findtext("dtyStr", "")
                 title = item.findtext("pblancSj", "")
                 tags = [t for t in [area, style, duty] if t]
-                tags += title.split()  # 제목 단어도 태그에 포함
+                tags += title.split()
                 companies.append({"name": name, "tags": tags})
         return companies
 
@@ -69,34 +112,6 @@ def build_company_list_from_job_api(keyword, rows=10):
         return []
 
 
-def get_job_postings(keyword, rows=3):
-    url = "https://118.67.151.173/data/api/jopblancApi.do"
-    params = {
-        "authKey": job_api_key,
-        "callTp": "L",
-        "listCount": rows,
-        "query": keyword
-    }
-    try:
-        response = requests.get(url, params=params, verify=False, timeout=10)
-        postings = []
-        if response.status_code == 200:
-            root = ET.fromstring(response.content)
-            for item in root.findall(".//jobList"):
-                postings.append({
-                    "entrprsNm": item.findtext("entrprsNm", ""),
-                    "title": item.findtext("pblancSj", ""),
-                    "regionNm": item.findtext("areaStr", ""),
-                    "emplmntTypeNm": item.findtext("emplymStleSeStr", ""),
-                    "linkUrl": "https://www.job.kosmes.or.kr/job/jbd/jobDetail.do?seq=" + item.findtext("jopblancIdx", "")
-                })
-        return postings
-    except Exception as e:
-        print("❌ 채용공고 파싱 오류:", str(e))
-        return []
-
-
-# ✅ 임베딩 기반 유사도 계산
 def compute_similarity(text1, text2):
     try:
         emb1 = client.embeddings.create(input=text1, model="text-embedding-ada-002").data[0].embedding
@@ -136,11 +151,8 @@ def build_explanation_prompt(keywords, preferences, company, job_summary=""):
         base += f"\n\n[채용공고]\n{job_summary}"
     return base
 
-@app.route("/")
-def home():
-    return jsonify({"message": "서버가 정상 작동 중입니다 🚀"})
-    
-# ✅ Fly.io 호환 포트 설정
+
+# 🔸 Fly.io 호환 실행
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
