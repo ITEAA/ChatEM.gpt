@@ -25,17 +25,18 @@ def home():
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
-        data = request.get_json()
-        user_input = data.get("message", "")
+        user_input = request.form.get("message", "")
+        file = request.files.get("file", None)
 
-        resume = extract_resume_text(user_input)
+        # 파일이 있으면 내용 읽기
+        resume = file.read().decode("utf-8") if file else user_input
+        if not resume.strip():
+            return jsonify({"reply": "❌ 내용이 비어 있습니다. 메시지나 파일을 입력해주세요."})
+
         keywords = extract_keywords(resume)
         user_prefs = extract_user_preferences(user_input)
 
-        # 기업 리스트 가져오기
         companies = build_company_list_from_job_api(keywords[0]) if keywords else []
-
-        # 기업 매칭
         match = match_company_to_user(companies, keywords, user_prefs)
 
         if not match:
