@@ -104,7 +104,20 @@ def build_company_list_from_job_api(keyword, rows=10):
                 tags = [t for t in [area, style, duty] if t]
                 tags += title.split()
                 companies.append({"name": name, "tags": tags})
-        return companies
+            if companies:
+                return companies
+    except Exception as e:
+        print("❌ API 요청 오류:", str(e))
+
+    #API 실패 시 더미 데이터 사용
+    print("⚠️ API 실패. 더미 기업 리스트 사용.")
+    return [
+        {"name": "한국세라믹기술원", "tags": ["세라믹", "연구개발", "재료", "진주"]},
+        {"name": "한국남동발전(주)", "tags": ["에너지", "발전소", "전기", "공기업", "진주"]},
+        {"name": "(주)휴먼아이티솔루션", "tags": ["IT", "의료정보", "소프트웨어", "진주"]},
+        {"name": "대호테크", "tags": ["자동차부품", "생산", "기계설비", "진주"]},
+        {"name": "(주)지엠텍", "tags": ["드론", "정밀측량", "항공촬영", "진주", "ICT"]},
+    ]
 
     except Exception as e:
         print("❌ API 요청 오류:", str(e))
