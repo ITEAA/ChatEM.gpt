@@ -25,15 +25,13 @@ def home():
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
-        data = request.get_json()
-        user_input = data.get("message", "")
-        
-        # 1. 사용자 입력에서 이력서 정보 및 선호도 추출
+        user_input = request.form.get("message", "")
+        # 파일도 필요하면 file = request.files.get("file")
+
         resume = extract_resume_text(user_input)
         keywords = extract_keywords(resume)
         user_prefs = extract_user_preferences(user_input)
 
-        # 2. 더미 기업 데이터
         dummy_companies = [
             {"name": "경남IT솔루션", "tags": ["진주", "소프트웨어", "개발", "백엔드"]},
             {"name": "진주로직스", "tags": ["물류", "운송", "경상남도", "물류관리"]},
@@ -41,19 +39,15 @@ def chat():
             {"name": "네오교육", "tags": ["에듀테크", "교육", "콘텐츠", "웹"]},
         ]
 
-        # 3. 더미 데이터를 이용한 매칭
         match = match_company_to_user(dummy_companies, keywords, user_prefs)
 
-        # 4. 추천 실패 방어
         if not match:
             return jsonify({"reply": "❌ 기업 정보를 불러오지 못했습니다. 나중에 다시 시도해주세요."})
 
-        # 5. GPT 응답 생성
         prompt = build_explanation_prompt(keywords, user_prefs, match)
         reply = get_gpt_reply(prompt)
 
         return jsonify({"reply": reply})
-
     except Exception as e:
         return jsonify({"reply": f"❌ 서버 오류: {str(e)}"}), 500
 
