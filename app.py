@@ -25,23 +25,30 @@ def home():
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
-        user_input = request.form.get("message", "")
-        file = request.files.get("file", None)
-
-        # 파일이 있으면 내용 읽기
-        resume = file.read().decode("utf-8") if file else user_input
-        if not resume.strip():
-            return jsonify({"reply": "❌ 내용이 비어 있습니다. 메시지나 파일을 입력해주세요."})
-
+        data = request.get_json()
+        user_input = data.get("message", "")
+        
+        # 1. 사용자 입력에서 이력서 정보 및 선호도 추출
+        resume = extract_resume_text(user_input)
         keywords = extract_keywords(resume)
         user_prefs = extract_user_preferences(user_input)
 
-        companies = build_company_list_from_job_api(keywords[0]) if keywords else []
-        match = match_company_to_user(companies, keywords, user_prefs)
+        # 2. 더미 기업 데이터
+        dummy_companies = [
+            {"name": "경남IT솔루션", "tags": ["진주", "소프트웨어", "개발", "백엔드"]},
+            {"name": "진주로직스", "tags": ["물류", "운송", "경상남도", "물류관리"]},
+            {"name": "에코그린테크", "tags": ["환경", "에너지", "친환경", "진주"]},
+            {"name": "네오교육", "tags": ["에듀테크", "교육", "콘텐츠", "웹"]},
+        ]
 
+        # 3. 더미 데이터를 이용한 매칭
+        match = match_company_to_user(dummy_companies, keywords, user_prefs)
+
+        # 4. 추천 실패 방어
         if not match:
             return jsonify({"reply": "❌ 기업 정보를 불러오지 못했습니다. 나중에 다시 시도해주세요."})
 
+        # 5. GPT 응답 생성
         prompt = build_explanation_prompt(keywords, user_prefs, match)
         reply = get_gpt_reply(prompt)
 
