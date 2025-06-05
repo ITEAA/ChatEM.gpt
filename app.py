@@ -120,10 +120,6 @@ def build_company_list_from_job_api(keyword, rows=10):
         {"name": "(주)지엠텍", "tags": ["드론", "정밀측량", "항공촬영", "진주", "ICT"]},
     ]
 
-    except Exception as e:
-        print("❌ API 요청 오류:", str(e))
-        return []
-
 # 🔸 코사인 유사도 계산
 def compute_similarity(text1, text2):
     try:
