@@ -1,0 +1,162 @@
+[
+  {
+    "name": "제이오텍",
+    "industry": "자동차 부품",
+    "region": "진주",
+    "size": "중소기업",
+    "summary": "센서 기반 자동차 부품 생산 전문 기업",
+    "url": ""
+  },
+  {
+    "name": "한울정밀",
+    "industry": "기계 제조",
+    "region": "진주",
+    "size": "중소기업",
+    "summary": "정밀기계 및 엔지니어링 서비스",
+    "url": ""
+  },
+  {
+    "name": "에이디엠",
+    "industry": "로봇/제어",
+    "region": "진주",
+    "size": "중소기업",
+    "summary": "산업 자동화 솔루션 및 로봇 제어기 개발",
+    "url": ""
+  },
+  {
+    "name": "비엔씨테크",
+    "industry": "정보통신",
+    "region": "진주",
+    "size": "중소기업",
+    "summary": "통신장비 및 모듈 설계",
+    "url": ""
+  },
+  {
+    "name": "우진이엔씨",
+    "industry": "토목/건설 IT",
+    "region": "진주",
+    "size": "중소기업",
+    "summary": "건설현장 안전 관리 솔루션 개발",
+    "url": ""
+  },
+  {
+    "name": "케이티엠테크",
+    "industry": "의료장비",
+    "region": "진주",
+    "size": "중소기업",
+    "summary": "의료기기 부품 및 IoT 연동 기술 보유",
+    "url": ""
+  },
+  {
+    "name": "다인정보기술",
+    "industry": "SI/SM",
+    "region": "진주",
+    "size": "중소기업",
+    "summary": "공공기관 정보화 사업 중심",
+    "url": ""
+  },
+  {
+    "name": "에코에너지텍",
+    "industry": "에너지",
+    "region": "진주",
+    "size": "중소기업",
+    "summary": "태양광 및 신재생에너지 기술 개발",
+    "url": ""
+  },
+  {
+    "name": "에프알시스템",
+    "industry": "철도/교통",
+    "region": "진주",
+    "size": "중소기업",
+    "summary": "스마트 교통 제어 시스템 전문",
+    "url": ""
+  },
+  {
+    "name": "에이스전자",
+    "industry": "전자부품",
+    "region": "진주",
+    "size": "중소기업",
+    "summary": "반도체 테스트 및 LED 모듈 설계",
+    "url": ""
+  },
+  {
+    "name": "에이엔지",
+    "industry": "항공 부품",
+    "region": "진주",
+    "size": "중소기업",
+    "summary": "항공기 부품 가공 전문",
+    "url": ""
+  },
+  {
+    "name": "진주하이텍",
+    "industry": "산업기계",
+    "region": "진주",
+    "size": "중소기업",
+    "summary": "자동화 생산설비 설계 및 유지보수",
+    "url": ""
+  },
+  {
+    "name": "코리아에너지",
+    "industry": "에너지",
+    "region": "진주",
+    "size": "중소기업",
+    "summary": "에너지 절감형 설비 개발",
+    "url": ""
+  },
+  {
+    "name": "디지털로직",
+    "industry": "IT",
+    "region": "진주",
+    "size": "중소기업",
+    "summary": "임베디드 SW 및 디지털 회로 설계",
+    "url": ""
+  },
+  {
+    "name": "삼우시스템",
+    "industry": "소프트웨어",
+    "region": "진주",
+    "size": "중소기업",
+    "summary": "물류 및 ERP 솔루션 제공",
+    "url": ""
+  },
+  {
+    "name": "스마트인프라",
+    "industry": "스마트시티",
+    "region": "진주",
+    "size": "중소기업",
+    "summary": "스마트시티 기반 구축 사업",
+    "url": ""
+  },
+  {
+    "name": "코드라인",
+    "industry": "SW 개발",
+    "region": "진주",
+    "size": "스타트업",
+    "summary": "AI 기반 코드 자동화 플랫폼 개발",
+    "url": ""
+  },
+  {
+    "name": "드림모션",
+    "industry": "모션제어",
+    "region": "진주",
+    "size": "중소기업",
+    "summary": "산업용 모터 제어 솔루션 개발",
+    "url": ""
+  },
+  {
+    "name": "이노에어",
+    "industry": "드론",
+    "region": "진주",
+    "size": "스타트업",
+    "summary": "농업용 드론 개발 및 정밀방제 시스템",
+    "url": ""
+  },
+  {
+    "name": "에코센서텍",
+    "industry": "센서",
+    "region": "진주",
+    "size": "중소기업",
+    "summary": "환경 센서 및 IoT 기반 모니터링 기술",
+    "url": ""
+  }
+]
