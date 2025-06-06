@@ -117,7 +117,7 @@ def build_recommendation_prompt(keywords, preferences, companies):
     return (
         f"[사용자 정보]\n키워드: {', '.join(keywords)}\n선호: {', '.join([p for p in preferences if p])}\n\n"
         f"[추천 기업 리스트]\n{company_str}\n\n"
-        f"왜 이 기업들이 적합한지 이유를 설명해주세요."
+        f"이 사용자에게 위 기업들이 왜 적합한지 챗봇 시점에서 객관적으로 설명해줘. 사용자 입장이 아니라 분석자 입장에서 써줘."
     )
 
 def get_gpt_reply(prompt):
