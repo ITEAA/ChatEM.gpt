@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify, render_template
-import os, re, json
+import os, re, requests, xml.etree.ElementTree as ET
 from dotenv import load_dotenv
 from functools import lru_cache
 from openai import OpenAI
@@ -9,6 +9,8 @@ client = OpenAI()
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY")
+assistant_id = os.getenv("ASSISTANT_ID")
+job_api_key = os.getenv("JOB_API_KEY")
 
 @app.route("/")
 def home():
@@ -18,25 +20,24 @@ def home():
 def chat():
     try:
         user_input = request.form.get("message", "")
-        user_interest = request.form.get("interest", "")
-        user_region = request.form.get("region", "")
-        user_salary = request.form.get("salary", "")
-
         resume = extract_resume_text(user_input)
         keywords = extract_keywords(resume)
-        preferences = extract_user_preferences(user_input) + [user_interest, user_region, user_salary]
+        user_prefs = extract_user_preferences(user_input)
 
-        companies = load_companies_from_json()
-        filtered = filter_companies(companies, user_interest, user_region)
+        companies = build_company_list_from_job_api("개발")
+        match = match_company_to_user(companies, keywords, user_prefs)
 
-        if not filtered:
-            filtered = companies[:3]  # fallback
+        # fallback 매칭 없을 때 더미 기업으로 진행
+        if not match:
+            print("⚠️ 기업 매칭 실패. 더미 기업으로 대체합니다.")
+            match = {"name": "더미기업", "tags": ["기술", "진주", "인공지능"]}
 
-        prompt = build_recommendation_prompt(keywords, preferences, filtered)
+        prompt = build_explanation_prompt(keywords, user_prefs, match)
         reply = get_gpt_reply(prompt)
 
         return jsonify({"reply": reply})
     except Exception as e:
+        print("❌ 서버 오류:", str(e))
         return jsonify({"reply": f"❌ 서버 오류: {str(e)}"}), 500
 
 def extract_resume_text(text):
@@ -58,31 +59,63 @@ def extract_keywords(text):
         print("❌ 키워드 추출 실패:", e)
         return []
 
-@lru_cache(maxsize=1)
-def load_companies_from_json():
-    with open("jinju_companies.json", "r", encoding="utf-8") as f:
-        return json.load(f)
+@lru_cache(maxsize=100)
+def build_company_list_from_job_api(keyword, rows=10):
+    url = "https://118.67.151.173/data/api/jopblancApi.do"  # 또는 프록시 주소
+    params = {
+        "authKey": job_api_key,
+        "callTp": "L",
+        "listCount": rows,
+        "query": keyword
+    }
+    try:
+        response = requests.get(url, params=params, verify=False, timeout=10)
+        if response.status_code == 200:
+            root = ET.fromstring(response.content)
+            companies = []
+            for item in root.findall(".//jobList"):
+                name = item.findtext("entrprsNm", "기업명 없음")
+                tags = [
+                    item.findtext("areaStr", ""),
+                    item.findtext("emplymStleSeStr", ""),
+                    item.findtext("dtyStr", "")
+                ]
+                tags += item.findtext("pblancSj", "").split()
+                companies.append({"name": name, "tags": [t for t in tags if t]})
+            return companies
+        else:
+            print("❌ API 응답 상태코드:", response.status_code)
+    except Exception as e:
+        print("❌ API 오류:", e)
 
-def filter_companies(companies, interest, region):
-    filtered = []
-    for c in companies:
-        tags = " ".join(c.get("tags", []))
-        if interest and interest not in tags:
-            continue
-        if region and region not in tags:
-            continue
-        filtered.append(c)
-    return filtered[:3]
+    return [{"name": "더미기업", "tags": ["개발", "진주", "기술"]}]
 
-def build_recommendation_prompt(keywords, preferences, companies):
-    company_str = "\n".join([f"- {c['name']} ({', '.join(c['tags'])})" for c in companies])
+def compute_similarity(text1, text2):
+    try:
+        emb1 = client.embeddings.create(input=text1, model="text-embedding-ada-002").data[0].embedding
+        emb2 = client.embeddings.create(input=text2, model="text-embedding-ada-002").data[0].embedding
+        dot = sum(x * y for x, y in zip(emb1, emb2))
+        norm1 = sum(x * x for x in emb1) ** 0.5
+        norm2 = sum(y * y for y in emb2) ** 0.5
+        return dot / (norm1 * norm2)
+    except Exception as e:
+        print("❌ 임베딩 유사도 계산 실패:", e)
+        return 0.0
+
+def match_company_to_user(companies, user_keywords, user_prefs):
+    user_text = " ".join(user_keywords + user_prefs)
+    best, best_score = None, -1
+    for company in companies:
+        score = compute_similarity(user_text, " ".join(company["tags"]))
+        if score > best_score:
+            best, best_score = company, score
+    return best
+
+def build_explanation_prompt(keywords, preferences, company):
     return (
-        "다음은 한 사용자의 자기소개서 키워드와 선호도, 그리고 추천 후보 기업입니다."
-        "\n이 사용자의 특성과 선호도에 가장 적합한 기업 1~2곳을 골라 추천해 주세요."
-        "\n설명은 따뜻하고 전문적인 어조로 작성해 주세요."
-        f"\n\n[사용자 키워드]\n{', '.join(keywords)}"
-        f"\n[사용자 선호도]\n{', '.join([p for p in preferences if p])}"
-        f"\n\n[기업 후보]\n{company_str}"
+        f"다음 사용자 정보와 추천 기업을 기반으로, 왜 이 기업이 적합한지 설명해주세요.\n\n"
+        f"[사용자 정보]\n- 키워드: {', '.join(keywords)}\n- 선호: {', '.join(preferences)}\n\n"
+        f"[추천 기업]\n- 기업명: {company['name']}\n- 태그: {', '.join(company['tags'])}"
     )
 
 def get_gpt_reply(prompt):
@@ -94,6 +127,7 @@ def get_gpt_reply(prompt):
         )
         return response.choices[0].message.content
     except Exception as e:
+        print("❌ GPT 응답 실패:", e)
         return f"❌ GPT 응답 오류: {str(e)}"
 
 if __name__ == "__main__":
