@@ -61,7 +61,7 @@
       gap: 10px;
     }
 
-    #userInput {
+    #userInput, #interestInput, #regionInput, #salaryInput {
       padding: 10px;
       font-size: 16px;
       border-radius: 5px;
@@ -97,7 +97,10 @@
     </div>
 
     <div id="inputArea">
-      <textarea id="userInput" placeholder="메시지를 입력하세요..." rows="2"></textarea>
+      <textarea id="userInput" placeholder="자기소개서 또는 메시지를 입력하세요..." rows="3"></textarea>
+      <input type="text" id="interestInput" placeholder="관심 분야 (선택사항)" />
+      <input type="text" id="regionInput" placeholder="희망 지역 (선택사항)" />
+      <input type="text" id="salaryInput" placeholder="희망 연봉 (선택사항)" />
       <input type="file" id="fileInput" />
       <button id="sendBtn" onclick="sendMessage()">보내기</button>
     </div>
@@ -107,6 +110,9 @@
     const input = document.getElementById("userInput");
     const chatBox = document.getElementById("chatBox");
     const fileInput = document.getElementById("fileInput");
+    const interestInput = document.getElementById("interestInput");
+    const regionInput = document.getElementById("regionInput");
+    const salaryInput = document.getElementById("salaryInput");
 
     input.addEventListener("keydown", function (e) {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -118,57 +124,58 @@
     async function sendMessage() {
       const message = input.value.trim();
       const file = fileInput.files[0];
+      const interest = interestInput.value.trim();
+      const region = regionInput.value.trim();
+      const salary = salaryInput.value.trim();
 
       if (!message && !file) return;
 
-      // 사용자 메시지 출력
       const userDiv = document.createElement("div");
       userDiv.className = "message user";
       userDiv.innerText = message || `[이력서/자기소개서 업로드됨: ${file.name}]`;
       chatBox.appendChild(userDiv);
 
-      // GPT 응답 로딩 메시지
       const loadingDiv = document.createElement("div");
       loadingDiv.className = "message gpt";
       loadingDiv.innerText = "분석 중입니다. 잠시만 기다려주세요...";
       chatBox.appendChild(loadingDiv);
 
-      // 서버에 메시지와 파일 전송
       const formData = new FormData();
       formData.append("message", message);
-      if (file) {
-        formData.append("file", file);
-      }
+      formData.append("interest", interest);
+      formData.append("region", region);
+      formData.append("salary", salary);
+      if (file) formData.append("file", file);
 
       try {
         const response = await fetch("/chat", {
           method: "POST",
           body: formData,
         });
-      
+
         const contentType = response.headers.get("content-type") || "";
-      
+
         if (!response.ok) {
           throw new Error(`서버 응답 오류: ${response.status}`);
         }
-      
+
         if (contentType.includes("application/json")) {
           const data = await response.json();
           loadingDiv.innerText = data.reply;
         } else {
           const text = await response.text();
-          loadingDiv.innerText = "❌ 예상치 못한 응답 형식입니다:\n" + text;
+          loadingDiv.innerText = "❌ 예상치 못한 응답 형식:\n" + text;
         }
       } catch (err) {
         loadingDiv.innerText = "❌ 오류 발생: " + err.message;
       }
 
-      // 입력 초기화 및 포커스 복원
       input.value = "";
+      interestInput.value = "";
+      regionInput.value = "";
+      salaryInput.value = "";
       fileInput.value = null;
       input.focus();
-
-      // 스크롤 최하단으로 이동
       chatBox.scrollTop = chatBox.scrollHeight;
     }
   </script>
