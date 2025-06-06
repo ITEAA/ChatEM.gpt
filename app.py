@@ -1,130 +1,111 @@
 import os
-import json
-import requests
-from flask import Flask, request, render_template
-from openai import OpenAI
+import openai
+import tempfile
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from werkzeug.utils import secure_filename
+from PyPDF2 import PdfReader
+from embedding import extract_keywords_with_gpt, match_resume_with_companies
+from convert_xml_to_json import convert_company_xml_to_json
+from save_jobs import fetch_company_list
 
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY")
+CORS(app)
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-def extract_keywords(text):
-    prompt = f"""
-다음 자기소개서에서 핵심 키워드 5개를 추출해줘. 각 키워드는 1~3단어 이내로 하고, 쉼표로 구분해서 출력해줘.
+@app.route("/chat", methods=["POST"])
+def chat():
+    try:
+        message = request.form.get("message", "")
+        file = request.files.get("file")
 
-{text}
+        # PDF 또는 텍스트 입력 처리
+        if file:
+            filename = secure_filename(file.filename)
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                file.save(tmp.name)
+                text = extract_text_from_pdf(tmp.name)
+                os.unlink(tmp.name)
+        else:
+            text = message
+
+        if not text.strip():
+            return jsonify({"reply": "❌ 이력서나 자기소개서를 입력하거나 파일을 업로드해주세요."})
+
+        # 키워드 추출
+        keywords = extract_keywords_with_gpt(text)
+        print("🔍 추출된 키워드:", keywords)
+
+        # 기업 리스트 불러오기 (더미 API 활용)
+        companies_xml = fetch_company_list()
+        companies = convert_company_xml_to_json(companies_xml)
+
+        # 매칭 알고리즘 실행
+        matched = match_resume_with_companies(text, companies)
+
+        # GPT 프롬프트 생성
+        prompt = generate_gpt_prompt(keywords, matched)
+
+        # GPT에게 결과 생성 요청
+        reply = get_gpt_reply(prompt)
+        return jsonify({"reply": reply})
+
+    except Exception as e:
+        print("❌ 오류 발생:", e)
+        return jsonify({"reply": "❌ 서버 오류가 발생했습니다. 다시 시도해주세요."})
+
+def extract_text_from_pdf(pdf_path):
+    try:
+        reader = PdfReader(pdf_path)
+        return "\n".join(page.extract_text() for page in reader.pages if page.extract_text())
+    except Exception as e:
+        print("❌ PDF 추출 오류:", e)
+        return ""
+
+def generate_gpt_prompt(keywords, matched_companies):
+    prompt = """
+당신은 사용자 이력서를 기반으로 맞춤 기업을 추천하는 AI입니다. 아래는 사용자 이력서에서 추출한 키워드와 추천된 기업들입니다.
+
+[사용자 키워드]
 """
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7
-        )
-        keywords = response.choices[0].message.content.strip()
-        return [k.strip() for k in keywords.split(",") if k.strip()]
-    except Exception as e:
-        print(f"❌ 키워드 추출 오류: {e}")
-        return []
+    prompt += ", ".join(keywords)
+    prompt += """
 
-def get_embedding(text):
-    try:
-        response = client.embeddings.create(
-            model="text-embedding-ada-002",
-            input=text
-        )
-        return response.data[0].embedding
-    except Exception as e:
-        print(f"❌ 임베딩 생성 오류: {e}")
-        return []
+[추천 기업 리스트]
+"""
+    if not matched_companies:
+        prompt += "- 조건에 맞는 기업이 없습니다."
+    else:
+        for c in matched_companies:
+            prompt += f"- 기업명: {c['corpNm']} / 주소: {c['address']} / 산업: {c['indTp']}\n"
 
-def cosine_similarity(vec1, vec2):
-    try:
-        dot = sum(a * b for a, b in zip(vec1, vec2))
-        norm1 = sum(a * a for a in vec1) ** 0.5
-        norm2 = sum(b * b for b in vec2) ** 0.5
-        return dot / (norm1 * norm2) if norm1 and norm2 else 0.0
-    except:
-        return 0.0
+    prompt += """
 
-def load_dummy_companies():
-    try:
-        with open("dummy_companies.json", "r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return []
-
-def get_companies(query):
-    try:
-        raise Exception("프록시 서버 비활성화로 API 생략")
-    except Exception as e:
-        print(f"❌ API 프록시 요청 실패: {e}")
-        print("⚠️ API 실패. 더미 기업 리스트 사용.")
-        return load_dummy_companies()
+위의 내용을 바탕으로 사용자의 관심에 맞는 2~3개 회사를 선택해 친절하게 추천해 주세요. 각 회사가 왜 적합한지도 설명해 주세요.
+"""
+    return prompt
 
 def get_gpt_reply(prompt):
     try:
         print("🧪 GPT 프롬프트 길이:", len(prompt))
-        response = client.chat.completions.create(
+        print("🔥 최종 GPT 프롬프트:\n", prompt[:1000], "... 생략")
+
+        response = openai.ChatCompletion.create(
             model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.8,
+            messages=[
+                {"role": "system", "content": "너는 취업 지원자를 위해 회사를 추천해주는 전문가야."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7
         )
-        return response.choices[0].message.content.strip()
+
+        reply = response.choices[0].message.content.strip()
+        return reply if reply else "❌ GPT 응답이 비어 있습니다."
+
     except Exception as e:
-        print("❌ GPT 응답 오류:", e)
-        return "죄송합니다. 현재 추천을 제공할 수 없습니다."
-
-@app.route("/", methods=["GET", "POST"])
-def index():
-    if request.method == "POST":
-        user_input = request.form.get("user_input", "")
-
-        if not user_input.strip():
-            return render_template("index.html", response="입력된 내용이 없습니다.")
-
-        # 너무 짧은 인삿말은 분석 제외
-        if len(user_input.replace("\n", "").replace(" ", "").strip()) < 10:
-            return render_template("index.html", response="안녕하세요! 원하시는 직무나 관심 분야, 또는 자기소개서를 입력해 주시면 맞춤 기업을 추천해드릴게요.")
-
-        # 1. 키워드 추출
-        keywords = extract_keywords(user_input)
-        keyword_str = ", ".join(keywords)
-
-        # 2. 사용자 임베딩 생성
-        user_embedding = get_embedding(user_input)
-
-        # 3. 기업 정보 가져오기
-        companies = get_companies(query=keywords[0] if keywords else "개발")
-
-        # 4. 기업 임베딩 및 유사도 계산
-        scored_companies = []
-        for company in companies:
-            description = company.get("description", "")
-            company_embedding = get_embedding(description)
-            score = cosine_similarity(user_embedding, company_embedding)
-            scored_companies.append({"company": company, "score": score})
-
-        # 5. 상위 3개 기업 선택
-        top_companies = sorted(scored_companies, key=lambda x: x["score"], reverse=True)[:3]
-
-        # 6. GPT에게 설명 요청
-        top_descriptions = [f"{c['company']['name']} - {c['company']['description']}" for c in top_companies]
-        final_prompt = f"""
-다음은 사용자의 자기소개서와 유사한 상위 3개 기업입니다. 각 기업이 사용자에게 적합한 이유를 2~3문장으로 요약해서 자연스럽게 설명해줘.
-
-자기소개서 키워드: {keyword_str}
-
-기업 목록:
-{chr(10).join(top_descriptions)}
-"""
-        explanation = get_gpt_reply(final_prompt)
-
-        return render_template("index.html", response=explanation)
-
-    return render_template("index.html")
+        print("❌ GPT 호출 오류:", e)
+        return "❌ GPT 호출 중 오류가 발생했습니다. 다시 시도해주세요."
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=8080, debug=True)
