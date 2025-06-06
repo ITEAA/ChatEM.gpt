@@ -5,6 +5,8 @@ import json
 import fitz  # PyMuPDF
 import openai
 from werkzeug.utils import secure_filename
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 app = Flask(__name__)
 CORS(app)
@@ -45,29 +47,37 @@ def extract_keywords(text):
 
 def match_companies(keywords, interest=None, region=None, salary=None):
     matches = []
+    keyword_text = " ".join(keywords)
+
+    documents = []
+    companies = []
 
     for company in company_data:
-        industry = company.get("industry", "")
-        location = company.get("region", "")
+        # 기업 정보 문장으로 구성
+        content = (company.get("industry", "") + " " + company.get("summary", "")).strip()
+        documents.append(content)
+        companies.append(company)
 
-        score = 0
-        # 키워드 매칭 점수
-        for kw in keywords:
-            if kw in industry:
-                score += 2
-            elif kw in company.get("summary", ""):
-                score += 1
+    # TF-IDF 유사도 계산
+    vectorizer = TfidfVectorizer().fit(documents + [keyword_text])
+    doc_vectors = vectorizer.transform(documents)
+    keyword_vector = vectorizer.transform([keyword_text])
 
-        # 관심 산업/지역 기반 보너스 점수
-        if interest and interest in industry:
+    similarities = cosine_similarity(keyword_vector, doc_vectors).flatten()
+
+    for sim, company in zip(similarities, companies):
+        score = sim * 10  # 유사도 점수 (0~1 → 0~10 스케일)
+
+        # 관심 산업 / 지역 보너스 점수
+        if interest and interest in company.get("industry", ""):
             score += 1
-        if region and region in location:
+        if region and region in company.get("region", ""):
             score += 1
 
         if score > 0:
             matches.append((score, company))
 
-    # 점수 기준 내림차순 정렬 후 상위 3개 추천
+    # 점수 기준 정렬
     sorted_matches = sorted(matches, key=lambda x: x[0], reverse=True)
     top_companies = [c for _, c in sorted_matches[:3]]
     return top_companies
@@ -113,6 +123,7 @@ def chat():
         return jsonify({"reply": reply})
 
     except Exception as e:
+        print(f"❌ 서버 처리 중 에러 발생: {e}")
         return jsonify({"reply": f"❌ 오류 발생: {str(e)}"}), 500
 
 if __name__ == "__main__":
