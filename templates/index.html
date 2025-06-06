@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>ChatEM 기업 추천 챗봇</title>
+  <title>ChatEM 기업 매칭 챗봇</title>
   <style>
     body {
       font-family: 'Segoe UI', sans-serif;
@@ -12,10 +12,9 @@
       display: flex;
       justify-content: center;
     }
-
     #chatContainer {
       width: 100%;
-      max-width: 600px;
+      max-width: 700px;
       background: white;
       border-radius: 10px;
       padding: 20px;
@@ -23,7 +22,6 @@
       display: flex;
       flex-direction: column;
     }
-
     #chatBox {
       display: flex;
       flex-direction: column;
@@ -35,7 +33,6 @@
       max-height: 500px;
       overflow-y: auto;
     }
-
     .message {
       padding: 10px 15px;
       border-radius: 15px;
@@ -43,32 +40,30 @@
       word-wrap: break-word;
       white-space: pre-wrap;
     }
-
     .user {
       background: #d1e7dd;
       align-self: flex-end;
     }
-
     .gpt {
       background: #e2e3e5;
       align-self: flex-start;
     }
-
     #inputArea {
       display: flex;
       flex-direction: column;
       margin-top: 15px;
       gap: 10px;
     }
-
-    textarea, input[type="text"], input[type="file"] {
+    textarea, input[type="text"] {
       padding: 10px;
-      font-size: 15px;
+      font-size: 16px;
       border-radius: 5px;
       border: 1px solid #ccc;
-      width: 100%;
     }
-
+    label {
+      font-weight: bold;
+      margin-top: 10px;
+    }
     #sendBtn {
       padding: 10px;
       font-size: 16px;
@@ -77,44 +72,34 @@
       color: white;
       border-radius: 5px;
       cursor: pointer;
-      align-self: flex-end;
       width: 100px;
+      align-self: flex-end;
     }
-
     #sendBtn:hover {
       background-color: #45a049;
-    }
-
-    label {
-      font-weight: bold;
-      margin-top: 5px;
     }
   </style>
 </head>
 <body>
   <div id="chatContainer">
-    <h2>ChatEM 기업 매칭 챗봇</h2>
+    <h2>ChatEM</h2>
     <div id="chatBox">
-      <div class="message gpt">
-        안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊<br>
-        자기소개서나 이력서를 입력하거나 파일을 첨부해 주세요.<br>
-        관심 산업, 희망 지역, 연봉도 함께 입력하면 더 정확한 추천이 가능합니다.
-      </div>
+      <div class="message gpt">안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊<br>자기소개서나 이력서를 입력하거나 첨부해 주세요.</div>
     </div>
 
     <div id="inputArea">
-      <textarea id="userInput" placeholder="자기소개서를 입력하거나 파일을 업로드하세요..." rows="4"></textarea>
+      <textarea id="userInput" placeholder="자기소개서나 메시지를 입력하세요..." rows="5"></textarea>
+
+      <label for="interest">관심 분야 (선택)</label>
+      <input type="text" id="interest" placeholder="예: 자율주행, AI, 경영">
+
+      <label for="region">희망 지역 (선택)</label>
+      <input type="text" id="region" placeholder="예: 진주, 서울">
+
+      <label for="salary">희망 연봉 (선택)</label>
+      <input type="text" id="salary" placeholder="예: 3000만원">
+
       <input type="file" id="fileInput" />
-
-      <label>관심 분야 (선택)</label>
-      <input type="text" id="interestInput" placeholder="예: 자율주행, AI, 물류" />
-
-      <label>희망 지역 (선택)</label>
-      <input type="text" id="regionInput" placeholder="예: 진주, 서울" />
-
-      <label>희망 연봉 (선택)</label>
-      <input type="text" id="salaryInput" placeholder="예: 3200만원" />
-
       <button id="sendBtn" onclick="sendMessage()">보내기</button>
     </div>
   </div>
@@ -123,27 +108,24 @@
     const input = document.getElementById("userInput");
     const chatBox = document.getElementById("chatBox");
     const fileInput = document.getElementById("fileInput");
-    const interestInput = document.getElementById("interestInput");
-    const regionInput = document.getElementById("regionInput");
-    const salaryInput = document.getElementById("salaryInput");
 
     async function sendMessage() {
       const message = input.value.trim();
       const file = fileInput.files[0];
-      const interest = interestInput.value.trim();
-      const region = regionInput.value.trim();
-      const salary = salaryInput.value.trim();
+      const interest = document.getElementById("interest").value.trim();
+      const region = document.getElementById("region").value.trim();
+      const salary = document.getElementById("salary").value.trim();
 
       if (!message && !file) return;
 
       const userDiv = document.createElement("div");
       userDiv.className = "message user";
-      userDiv.innerText = message || `[이력서/자기소개서 업로드됨: ${file.name}]`;
+      userDiv.innerText = message || `[파일 업로드됨: ${file.name}]`;
       chatBox.appendChild(userDiv);
 
       const loadingDiv = document.createElement("div");
       loadingDiv.className = "message gpt";
-      loadingDiv.innerText = "📊 분석 중입니다. 잠시만 기다려주세요...";
+      loadingDiv.innerText = "분석 중입니다. 잠시만 기다려주세요...";
       chatBox.appendChild(loadingDiv);
 
       const formData = new FormData();
@@ -158,27 +140,17 @@
           method: "POST",
           body: formData,
         });
-
-        const contentType = response.headers.get("content-type") || "";
-        if (!response.ok) throw new Error(`서버 오류: ${response.status}`);
-
-        if (contentType.includes("application/json")) {
-          const data = await response.json();
-          loadingDiv.innerText = data.reply;
-        } else {
-          const text = await response.text();
-          loadingDiv.innerText = "❌ 예상치 못한 응답:\n" + text;
-        }
+        const data = await response.json();
+        loadingDiv.innerText = data.reply;
       } catch (err) {
         loadingDiv.innerText = "❌ 오류 발생: " + err.message;
       }
 
       input.value = "";
       fileInput.value = null;
-      interestInput.value = "";
-      regionInput.value = "";
-      salaryInput.value = "";
-
+      document.getElementById("interest").value = "";
+      document.getElementById("region").value = "";
+      document.getElementById("salary").value = "";
       input.focus();
       chatBox.scrollTop = chatBox.scrollHeight;
     }
