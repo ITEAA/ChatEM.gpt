@@ -1,100 +1,99 @@
+import os
+import json
+import openai
+import fitz  # PyMuPDF
 from flask import Flask, request, jsonify, render_template
-import os, json, re
-from dotenv import load_dotenv
-from openai import OpenAI
-
-load_dotenv()
-client = OpenAI()
+from flask_cors import CORS
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY")
-assistant_id = os.getenv("ASSISTANT_ID")
+CORS(app)
 
-# Load local JSON companies file
+# OpenAI 키 설정 (환경 변수 또는 직접 입력)
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
+# 진주 기업 정보 로딩
 with open("jinju_companies.json", encoding="utf-8") as f:
-    LOCAL_COMPANIES = json.load(f)
+    JINJU_COMPANIES = json.load(f)
+
+# 키워드 추출 함수
+def extract_keywords(text):
+    prompt = f"""다음 자기소개서에서 핵심 키워드를 5~7개 추출해줘. 콤마로 구분하고 형용사/명사 위주로 간결하게.
+자기소개서:
+{text}
+
+키워드:"""
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3
+    )
+    keywords = response.choices[0].message.content.strip()
+    return [kw.strip() for kw in keywords.split(",")]
+
+# 가장 유사한 기업 추천 함수
+def recommend_companies(keywords, user_interest, region, salary):
+    candidates = []
+    for c in JINJU_COMPANIES:
+        if region and region not in c["region"]:
+            continue
+        if user_interest and user_interest not in c["industry"]:
+            continue
+        candidates.append(c)
+
+    if not candidates:
+        return []
+
+    corpus = [" ".join(keywords)] + [c["industry"] + " " + c["summary"] for c in candidates]
+    vectorizer = TfidfVectorizer()
+    tfidf = vectorizer.fit_transform(corpus)
+    scores = cosine_similarity(tfidf[0:1], tfidf[1:]).flatten()
+
+    sorted_indices = scores.argsort()[::-1]
+    top_matches = [candidates[i] for i in sorted_indices[:3] if scores[i] > 0.1]
+    return top_matches
+
+# PDF 텍스트 추출 함수
+def extract_text_from_pdf(file):
+    doc = fitz.open(stream=file.read(), filetype="pdf")
+    text = "\n".join(page.get_text() for page in doc)
+    return text
 
 @app.route("/")
-def home():
+def index():
     return render_template("index.html")
 
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
-        user_input = request.form.get("message", "")
-        user_interest = request.form.get("interest", "")
-        user_region = request.form.get("region", "")
-        user_salary = request.form.get("salary", "")
+        message = request.form.get("message", "")
+        interest = request.form.get("interest", "")
+        region = request.form.get("region", "")
+        salary = request.form.get("salary", "")
+        file = request.files.get("file")
 
-        resume_text = extract_resume_text(user_input)
-        keywords = extract_keywords(resume_text)
+        if file:
+            content = extract_text_from_pdf(file)
+        else:
+            content = message
 
-        preferences = [user_interest, user_region, user_salary]
-        companies = filter_local_companies(keywords, preferences)
+        if not content.strip():
+            return jsonify({"reply": "자기소개서나 메시지를 입력해 주세요."})
+
+        keywords = extract_keywords(content)
+        companies = recommend_companies(keywords, interest, region, salary)
 
         if not companies:
             return jsonify({"reply": "조건에 맞는 기업을 찾지 못했습니다. 입력값을 조정해 보세요."})
 
-        prompt = build_prompt(keywords, preferences, companies)
-        reply = get_gpt_reply(prompt)
-
-        return jsonify({"reply": reply})
+        reply = "아래 기업들을 추천드립니다:\n\n"
+        for c in companies:
+            reply += f"기업명: {c['name']}\n업종: {c['industry']}\n요약: {c['summary']}\n근무 지역: {c['region']}\n\n"
+        return jsonify({"reply": reply.strip()})
 
     except Exception as e:
-        return jsonify({"reply": f"❌ 서버 오류: {str(e)}"}), 500
-
-def extract_resume_text(text):
-    return text
-
-def extract_keywords(text):
-    prompt = f"다음 자기소개서에서 핵심 기술, 직무, 경험 키워드를 쉼표로 추출해줘:\n{text}"
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4-1106-preview",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3
-        )
-        return [kw.strip() for kw in response.choices[0].message.content.split(",") if kw.strip()]
-    except Exception as e:
-        print("❌ 키워드 추출 실패:", e)
-        return []
-
-def filter_local_companies(keywords, preferences):
-    interest, region, _ = preferences
-    matches = []
-
-    for company in LOCAL_COMPANIES:
-        tags = (company.get("산업", "") + " " + company.get("소개", "")).lower()
-        name = company.get("기업명", "")
-
-        # 필터 조건 중 하나라도 만족하면 추가
-        if any(k.lower() in tags for k in keywords) or any(p.lower() in tags for p in preferences if p):
-            matches.append(company)
-
-    return matches[:3] if matches else LOCAL_COMPANIES[:3]
-
-def build_prompt(keywords, preferences, companies):
-    company_list = "\n".join([
-        f"- 기업명: {c['기업명']}\n  산업 분야: {c['산업']}\n  지역: {c['지역']}\n  소개: {c['소개']}"
-        for c in companies
-    ])
-    return (
-        f"너는 지금부터 사용자의 특성과 선호도를 파악해 가장 적합한 기업을 추천해주는 역할을 수행한다. 다음 지침을 따르라:\n"
-        f"\n[사용자 정보]\n키워드: {', '.join(keywords)}\n선호: {', '.join([p for p in preferences if p])}\n"
-        f"\n[기업 리스트]\n{company_list}\n"
-        f"\n위 기업들 중 사용자의 성향과 가장 잘 맞는 회사를 1~2개 추천하고 이유를 설명해줘."
-    )
-
-def get_gpt_reply(prompt):
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4-1106-preview",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.5
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"❌ GPT 응답 오류: {str(e)}"
+        return jsonify({"reply": f"❌ 오류 발생: {str(e)}"}), 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+    app.run(host="0.0.0.0", port=8080)
