@@ -1,7 +1,8 @@
 from flask import Flask, request, jsonify, render_template
+import time
+import requests
 import os
 import re
-import requests
 import xml.etree.ElementTree as ET
 from functools import lru_cache
 from dotenv import load_dotenv
@@ -14,7 +15,7 @@ app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY")
 assistant_id = os.getenv("ASSISTANT_ID")
 job_api_key = os.getenv("JOB_API_KEY")
-proxy_url = os.getenv("PROXY_URL", "http://127.0.0.1:5001/proxy")
+PROXY_URL = "http://127.0.0.1:5001/proxy"
 
 @app.route("/")
 def home():
@@ -24,15 +25,11 @@ def home():
 def chat():
     try:
         user_input = request.form.get("message", "")
-
-        if len(user_input.strip()) < 5:
-            return jsonify({"reply": "간단한 인사말보다는 관심 분야나 자기소개서 내용을 입력해 주세요 😊"})
-
         resume = extract_resume_text(user_input)
         keywords = extract_keywords(resume)
         user_prefs = extract_user_preferences(user_input)
 
-        companies = build_company_list_from_proxy_api("개발")
+        companies = build_company_list_from_job_api("개발")
         match = match_company_to_user(companies, keywords, user_prefs)
 
         if not match:
@@ -52,45 +49,63 @@ def extract_user_preferences(text):
     return parse_user_preferences(text)
 
 def extract_keywords(text):
-    prompt = f"다음 자기소개서에서 핵심 키워드를 쉼표로 추출해줘:\n{text}"
+    if len(text.strip()) < 10:
+        return ["개발", "팀워크"]
+
+    prompt = f"다음 자기소개서에서 핵심 기술, 직무, 경험 키워드를 쉼표로 추출해줘:\n{text}"
     try:
         response = client.chat.completions.create(
             model="gpt-4-1106-preview",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3
         )
-        return [kw.strip() for kw in response.choices[0].message.content.split(",") if kw.strip()]
+        return [kw.strip() for kw in response.choices[0].message.content.split(",")]
     except Exception as e:
         print("❌ 키워드 추출 실패:", e)
-        return ["AI", "프로그래밍", "팀워크"]
+        return ["개발", "팀워크", "문제해결"]
 
 def parse_user_preferences(text):
     prefs = re.findall(r"\d+\.\s*([^\n]*)", text)
     return [p.strip() for p in prefs]
 
 @lru_cache(maxsize=100)
-def build_company_list_from_proxy_api(keyword, rows=10):
+def build_company_list_from_job_api(keyword, rows=10):
+    params = {
+        "authKey": job_api_key,
+        "callTp": "L",
+        "listCount": rows,
+        "query": keyword
+    }
     try:
-        params = {
-            "authKey": job_api_key,
-            "callTp": "L",
-            "listCount": rows,
-            "query": keyword,
-        }
-        response = requests.get(proxy_url, params=params, timeout=10)
+        response = requests.get(PROXY_URL, params=params, timeout=10)
+        print("📡 프록시 요청 URL:", response.url)
+        print("🔍 응답 상태 코드:", response.status_code)
+
         companies = []
         if response.status_code == 200:
             root = ET.fromstring(response.content)
             for item in root.findall(".//jobList"):
                 name = item.findtext("entrprsNm", "기업명 없음")
-                tags = [item.findtext(k, '') for k in ["areaStr", "emplymStleSeStr", "dtyStr"] if item.findtext(k)]
+                area = item.findtext("areaStr", "")
+                style = item.findtext("emplymStleSeStr", "")
+                duty = item.findtext("dtyStr", "")
                 title = item.findtext("pblancSj", "")
+                tags = [t for t in [area, style, duty] if t]
                 tags += title.split()
                 companies.append({"name": name, "tags": tags})
-            return companies
+            if companies:
+                return companies
     except Exception as e:
-        print("❌ Proxy API 오류:", str(e))
-    return []
+        print("❌ API 프록시 요청 실패:", str(e))
+
+    print("⚠️ API 실패. 더미 기업 리스트 사용.")
+    return [
+        {"name": "한국세라믹기술원", "tags": ["세라믹", "연구개발", "재료", "진주"]},
+        {"name": "한국남동발전(주)", "tags": ["에너지", "발전소", "전기", "공기업", "진주"]},
+        {"name": "(주)휴먼아이티솔루션", "tags": ["IT", "의료정보", "소프트웨어", "진주"]},
+        {"name": "대호테크", "tags": ["자동차부품", "생산", "기계설비", "진주"]},
+        {"name": "(주)지엠텍", "tags": ["드론", "정밀측량", "항공촬영", "진주", "ICT"]},
+    ]
 
 def compute_similarity(text1, text2):
     try:
@@ -109,18 +124,25 @@ def cosine_similarity(a, b):
 
 def match_company_to_user(companies, user_keywords, user_prefs):
     user_text = " ".join(user_keywords + user_prefs)
-    best, best_score = None, -1
+    best = None
+    best_score = -1
     for company in companies:
         company_text = " ".join(company["tags"])
         score = compute_similarity(user_text, company_text)
         if score > best_score:
-            best, best_score = company, score
-    return best
+            best = company
+            best_score = score
+    return best or (companies[0] if companies else None)
 
-def build_explanation_prompt(keywords, preferences, company):
-    base = f"사용자 정보와 추천 기업 기반 설명:\n"
-    base += f"[키워드] {', '.join(keywords)}\n[선호] {', '.join(preferences)}\n"
-    base += f"[추천 기업] {company['name']}\n[태그] {', '.join(company['tags'])}"
+def build_explanation_prompt(keywords, preferences, company, job_summary=""):
+    base = f"다음 사용자 정보와 추천 기업을 기반으로, 왜 이 기업이 적합한지 설명해주세요.\n\n"
+    base += f"[사용자 정보]\n- 키워드: {', '.join(keywords)}\n- 선호: {', '.join(preferences)}\n\n"
+    if company is None:
+        base += "[추천 기업 정보 없음]\n- 기업 추천에 실패했습니다."
+        return base
+    base += f"[추천 기업]\n- 기업명: {company['name']}\n- 태그: {', '.join(company['tags'])}"
+    if job_summary:
+        base += f"\n\n[채용공고]\n{job_summary}"
     return base
 
 def get_gpt_reply(prompt):
@@ -132,8 +154,8 @@ def get_gpt_reply(prompt):
         )
         return response.choices[0].message.content
     except Exception as e:
-        print("❌ GPT 응답 실패:", e)
-        return "GPT 분석에 실패했습니다. 다시 시도해 주세요."
+        print("❌ GPT 응답 오류:", str(e))
+        return "❌ GPT 응답에 실패했습니다. 나중에 다시 시도해주세요."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
