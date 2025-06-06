@@ -3,18 +3,18 @@ from flask_cors import CORS
 import os
 import json
 import fitz  # PyMuPDF
-import openai
+from openai import OpenAI
 from werkzeug.utils import secure_filename
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+from difflib import SequenceMatcher
 
 app = Flask(__name__)
 CORS(app)
 
-# OpenAI API 키 설정 (환경 변수 또는 직접 설정)
-openai.api_key = os.getenv("OPENAI_API_KEY") or "your-api-key"
+# OpenAI API 키 설정
+api_key = os.getenv("OPENAI_API_KEY") or "your-api-key"
+client = OpenAI(api_key=api_key)
 
-# 기업 데이터 로딩 (진주 지역)
+# 기업 데이터 로딩
 with open("jinju_companies.json", "r", encoding="utf-8") as f:
     company_data = json.load(f)
 
@@ -33,7 +33,7 @@ def extract_keywords(text):
     {text}
     """
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4
@@ -45,39 +45,35 @@ def extract_keywords(text):
         print(f"❌ GPT 호출 에러: {e}")
         return []
 
+def similarity(a, b):
+    return SequenceMatcher(None, a, b).ratio()
+
 def match_companies(keywords, interest=None, region=None, salary=None):
     matches = []
-    keyword_text = " ".join(keywords)
-
-    documents = []
-    companies = []
 
     for company in company_data:
-        # 기업 정보 문장으로 구성
-        content = (company.get("industry", "") + " " + company.get("summary", "")).strip()
-        documents.append(content)
-        companies.append(company)
+        industry = company.get("industry", "")
+        summary = company.get("summary", "")
+        location = company.get("region", "")
 
-    # TF-IDF 유사도 계산
-    vectorizer = TfidfVectorizer().fit(documents + [keyword_text])
-    doc_vectors = vectorizer.transform(documents)
-    keyword_vector = vectorizer.transform([keyword_text])
+        score = 0
 
-    similarities = cosine_similarity(keyword_vector, doc_vectors).flatten()
+        # 단어 유사도 기반 매칭 점수
+        for kw in keywords:
+            if similarity(kw, industry) > 0.7:
+                score += 2
+            elif similarity(kw, summary) > 0.5:
+                score += 1
 
-    for sim, company in zip(similarities, companies):
-        score = sim * 10  # 유사도 점수 (0~1 → 0~10 스케일)
-
-        # 관심 산업 / 지역 보너스 점수
-        if interest and interest in company.get("industry", ""):
+        # 관심 산업/지역 기반 보너스
+        if interest and similarity(interest, industry) > 0.7:
             score += 1
-        if region and region in company.get("region", ""):
+        if region and similarity(region, location) > 0.7:
             score += 1
 
         if score > 0:
             matches.append((score, company))
 
-    # 점수 기준 정렬
     sorted_matches = sorted(matches, key=lambda x: x[0], reverse=True)
     top_companies = [c for _, c in sorted_matches[:3]]
     return top_companies
@@ -123,7 +119,7 @@ def chat():
         return jsonify({"reply": reply})
 
     except Exception as e:
-        print(f"❌ 서버 처리 중 에러 발생: {e}")
+        print(f"❌ 서버 에러: {e}")
         return jsonify({"reply": f"❌ 오류 발생: {str(e)}"}), 500
 
 if __name__ == "__main__":
