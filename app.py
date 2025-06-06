@@ -3,6 +3,7 @@ import time
 import requests
 import os
 import re
+import json
 import xml.etree.ElementTree as ET
 from functools import lru_cache
 from dotenv import load_dotenv
@@ -78,8 +79,8 @@ def build_company_list_from_job_api(keyword, rows=10):
     }
     try:
         response = requests.get(PROXY_URL, params=params, timeout=10)
-        print("📡 프록시 요청 URL:", response.url)
-        print("🔍 응답 상태 코드:", response.status_code)
+        print("\U0001f4e1 프록시 요청 URL:", response.url)
+        print("\U0001f50d 응답 상태 코드:", response.status_code)
 
         companies = []
         if response.status_code == 200:
@@ -99,13 +100,15 @@ def build_company_list_from_job_api(keyword, rows=10):
         print("❌ API 프록시 요청 실패:", str(e))
 
     print("⚠️ API 실패. 더미 기업 리스트 사용.")
-    return [
-        {"name": "한국세라믹기술원", "tags": ["세라믹", "연구개발", "재료", "진주"]},
-        {"name": "한국남동발전(주)", "tags": ["에너지", "발전소", "전기", "공기업", "진주"]},
-        {"name": "(주)휴먼아이티솔루션", "tags": ["IT", "의료정보", "소프트웨어", "진주"]},
-        {"name": "대호테크", "tags": ["자동차부품", "생산", "기계설비", "진주"]},
-        {"name": "(주)지엠텍", "tags": ["드론", "정밀측량", "항공촬영", "진주", "ICT"]},
-    ]
+    return load_dummy_companies_from_file()
+
+def load_dummy_companies_from_file():
+    try:
+        with open("dummy_companies.json", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print("❌ 더미 데이터 로딩 실패:", e)
+        return []
 
 def compute_similarity(text1, text2):
     try:
