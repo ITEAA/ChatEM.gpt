@@ -1,13 +1,16 @@
-import xmltodict
+import xml.etree.ElementTree as ET
 import json
 
-with open("job_data.xml", "r", encoding="utf-8") as f:
-    xml_str = f.read()
+with open("response.xml", encoding="utf-8") as f:
+    xml_data = f.read()
 
-data_dict = xmltodict.parse(xml_str)
-json_data = json.dumps(data_dict, indent=2, ensure_ascii=False)
+root = ET.fromstring(xml_data)
+jobs = []
+for item in root.findall(".//jobList"):
+    jobs.append({
+        "name": item.findtext("entrprsNm"),
+        "title": item.findtext("pblancSj"),
+        "area": item.findtext("areaStr"),
+    })
 
-with open("job_data.json", "w", encoding="utf-8") as f:
-    f.write(json_data)
-
-print("✅ 변환 완료: job_data.json")
+print(json.dumps(jobs, indent=2, ensure_ascii=False))
