@@ -1,20 +1,20 @@
 from flask import Flask, request, jsonify, render_template
-import time
-import requests
 import os
 import re
 import json
+import time
+import requests
 import xml.etree.ElementTree as ET
 from functools import lru_cache
 from dotenv import load_dotenv
 from openai import OpenAI
 
+# Load environment variables
 load_dotenv()
 client = OpenAI()
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY")
-assistant_id = os.getenv("ASSISTANT_ID")
 job_api_key = os.getenv("JOB_API_KEY")
 PROXY_URL = "http://127.0.0.1:5001/proxy"
 
@@ -46,13 +46,9 @@ def chat():
 def extract_resume_text(text):
     return text
 
-def extract_user_preferences(text):
-    return parse_user_preferences(text)
-
 def extract_keywords(text):
     if len(text.strip()) < 10:
         return ["개발", "팀워크"]
-
     prompt = f"다음 자기소개서에서 핵심 기술, 직무, 경험 키워드를 쉼표로 추출해줘:\n{text}"
     try:
         response = client.chat.completions.create(
@@ -65,8 +61,8 @@ def extract_keywords(text):
         print("❌ 키워드 추출 실패:", e)
         return ["개발", "팀워크", "문제해결"]
 
-def parse_user_preferences(text):
-    prefs = re.findall(r"\d+\.\s*([^\n]*)", text)
+def extract_user_preferences(text):
+    prefs = re.findall(r"\d+\\.?\s*([^\\n]*)", text)
     return [p.strip() for p in prefs]
 
 @lru_cache(maxsize=100)
@@ -79,11 +75,8 @@ def build_company_list_from_job_api(keyword, rows=10):
     }
     try:
         response = requests.get(PROXY_URL, params=params, timeout=10)
-        print("\U0001f4e1 프록시 요청 URL:", response.url)
-        print("\U0001f50d 응답 상태 코드:", response.status_code)
-
-        companies = []
         if response.status_code == 200:
+            companies = []
             root = ET.fromstring(response.content)
             for item in root.findall(".//jobList"):
                 name = item.findtext("entrprsNm", "기업명 없음")
@@ -91,13 +84,12 @@ def build_company_list_from_job_api(keyword, rows=10):
                 style = item.findtext("emplymStleSeStr", "")
                 duty = item.findtext("dtyStr", "")
                 title = item.findtext("pblancSj", "")
-                tags = [t for t in [area, style, duty] if t]
-                tags += title.split()
+                tags = [t for t in [area, style, duty] if t] + title.split()
                 companies.append({"name": name, "tags": tags})
             if companies:
                 return companies
     except Exception as e:
-        print("❌ API 프록시 요청 실패:", str(e))
+        print("❌ API 프록시 요청 실패:", e)
 
     print("⚠️ API 실패. 더미 기업 리스트 사용.")
     return load_dummy_companies_from_file()
