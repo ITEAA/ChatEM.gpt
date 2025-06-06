@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>ChatEM 기업 매칭 챗봇</title>
+  <title>ChatEM 기업 추천 챗봇</title>
   <style>
     body {
       font-family: 'Segoe UI', sans-serif;
@@ -61,15 +61,12 @@
       gap: 10px;
     }
 
-    #userInput, #interestInput, #regionInput, #salaryInput {
+    textarea, input[type="text"], input[type="file"] {
       padding: 10px;
-      font-size: 16px;
+      font-size: 15px;
       border-radius: 5px;
       border: 1px solid #ccc;
-    }
-
-    #fileInput {
-      border: none;
+      width: 100%;
     }
 
     #sendBtn {
@@ -80,28 +77,44 @@
       color: white;
       border-radius: 5px;
       cursor: pointer;
-      width: 100px;
       align-self: flex-end;
+      width: 100px;
     }
 
     #sendBtn:hover {
       background-color: #45a049;
     }
+
+    label {
+      font-weight: bold;
+      margin-top: 5px;
+    }
   </style>
 </head>
 <body>
   <div id="chatContainer">
-    <h2>ChatEM</h2>
+    <h2>ChatEM 기업 매칭 챗봇</h2>
     <div id="chatBox">
-      <div class="message gpt">안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊<br>자기소개서나 이력서를 첨부해주시면 더 정확한 추천이 가능해요!</div>
+      <div class="message gpt">
+        안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊<br>
+        자기소개서나 이력서를 입력하거나 파일을 첨부해 주세요.<br>
+        관심 산업, 희망 지역, 연봉도 함께 입력하면 더 정확한 추천이 가능합니다.
+      </div>
     </div>
 
     <div id="inputArea">
-      <textarea id="userInput" placeholder="자기소개서 또는 메시지를 입력하세요..." rows="3"></textarea>
-      <input type="text" id="interestInput" placeholder="관심 분야 (선택사항)" />
-      <input type="text" id="regionInput" placeholder="희망 지역 (선택사항)" />
-      <input type="text" id="salaryInput" placeholder="희망 연봉 (선택사항)" />
+      <textarea id="userInput" placeholder="자기소개서를 입력하거나 파일을 업로드하세요..." rows="4"></textarea>
       <input type="file" id="fileInput" />
+
+      <label>관심 분야 (선택)</label>
+      <input type="text" id="interestInput" placeholder="예: 자율주행, AI, 물류" />
+
+      <label>희망 지역 (선택)</label>
+      <input type="text" id="regionInput" placeholder="예: 진주, 서울" />
+
+      <label>희망 연봉 (선택)</label>
+      <input type="text" id="salaryInput" placeholder="예: 3200만원" />
+
       <button id="sendBtn" onclick="sendMessage()">보내기</button>
     </div>
   </div>
@@ -113,13 +126,6 @@
     const interestInput = document.getElementById("interestInput");
     const regionInput = document.getElementById("regionInput");
     const salaryInput = document.getElementById("salaryInput");
-
-    input.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        sendMessage();
-      }
-    });
 
     async function sendMessage() {
       const message = input.value.trim();
@@ -137,7 +143,7 @@
 
       const loadingDiv = document.createElement("div");
       loadingDiv.className = "message gpt";
-      loadingDiv.innerText = "분석 중입니다. 잠시만 기다려주세요...";
+      loadingDiv.innerText = "📊 분석 중입니다. 잠시만 기다려주세요...";
       chatBox.appendChild(loadingDiv);
 
       const formData = new FormData();
@@ -154,27 +160,25 @@
         });
 
         const contentType = response.headers.get("content-type") || "";
-
-        if (!response.ok) {
-          throw new Error(`서버 응답 오류: ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`서버 오류: ${response.status}`);
 
         if (contentType.includes("application/json")) {
           const data = await response.json();
           loadingDiv.innerText = data.reply;
         } else {
           const text = await response.text();
-          loadingDiv.innerText = "❌ 예상치 못한 응답 형식:\n" + text;
+          loadingDiv.innerText = "❌ 예상치 못한 응답:\n" + text;
         }
       } catch (err) {
         loadingDiv.innerText = "❌ 오류 발생: " + err.message;
       }
 
       input.value = "";
+      fileInput.value = null;
       interestInput.value = "";
       regionInput.value = "";
       salaryInput.value = "";
-      fileInput.value = null;
+
       input.focus();
       chatBox.scrollTop = chatBox.scrollHeight;
     }
