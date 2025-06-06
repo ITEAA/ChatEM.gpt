@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 import os
@@ -125,7 +124,7 @@ def chat():
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=8080)
-=======
+
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 import os
@@ -252,4 +251,3 @@ def chat():
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=8080)
->>>>>>> 0bf8da5 (fix: updated OpenAI ChatCompletion to new SDK style)
