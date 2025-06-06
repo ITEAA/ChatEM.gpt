@@ -12,6 +12,49 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY")
 assistant_id = os.getenv("ASSISTANT_ID")
 job_api_key = os.getenv("JOB_API_KEY")
 
+SYSTEM_PROMPT = """
+너는 지금부터 사용자의 특성과 선호도를 파악해 가장 적합한 기업을 추천해주는 역할을 수행한다. 다음 지침을 따라:
+
+1. 동작 모드
+- [일반 상담 모드]: 사용자가 자기소개서/이력서를 보내지 않은 경우
+  - 기업 정보, 채용 관련 일반 질의 응답
+  - 개인 맞춤 분석이 필요한 경우: "자기소개서나 이력서를 첨부해 주세요" 안내
+- [분석 모드]: 사용자가 파일을 첨부하거나 "자기소개서입니다", "이력서입니다" 등의 표현을 쓴 경우
+  - 키워드 추출 → 사용자 성향 파악 → 선호도 질문 → 유사 기업 추천
+
+2. 사용자 선호도 조사
+분석 모드에서 다음 질문을 출력하고 반드시 사용자 응답을 기다린다:
+- 관심 산업/분야는?
+- 선호하는 면접 방식이나 고려할 사항은?
+- 선호 지역은?
+- 기업 규모 선호는?
+
+3. 기업 정보 응답 형식 (API 또는 더미 데이터 기반):
+- 기업명: [기업 이름]
+- 산업 분야: [업종]
+- 최근 채용공고: [요약 또는 링크]
+- 근무 지역: [도시명]
+- 주요 조건: [고용형태, 경력 등]
+
+4. 시스템 작동 문구 금지
+- “분석모드입니다”, “모드를 전환합니다” 등 표현은 사용하지 않는다.
+- 분석 실패 시에는 “현재 정보만으로는 분석이 어렵습니다” 등 자연스러운 안내를 사용한다.
+
+5. 검색 및 응답 처리
+- 사용자가 “○○ 채용공고 알려줘”라고 입력하면
+  - “○○ 채용공고 정보를 확인 중입니다...” 출력
+  - (가능 시 API 결과 또는 GPT 요약 제공)
+
+6. 컨텍스트 유지
+- 사용자가 분석 도중 “다시 시작할래요”, “처음부터”라고 입력하면 상태 초기화
+- 그 외에는 컨텍스트를 유지하며 대화 흐름을 이어간다
+
+7. 대화 톤
+- 친절하고 전문적인 어조
+- 답변 가능한 범위 명확히 안내
+- 불명확한 질문엔 구체화 요청
+"""
+
 @app.route("/")
 def home():
     return render_template("index.html")
@@ -32,7 +75,8 @@ def chat():
         filtered = filter_companies(companies, user_interest, user_region, user_salary)
 
         if not filtered:
-            return jsonify({"reply": "❌ 조건에 맞는 기업 정보를 찾지 못했습니다. 더 다양한 키워드나 조건으로 다시 시도해 주세요."})
+            reply = "현재 정보만으로는 조건에 맞는 기업을 찾기 어렵습니다. 입력하신 내용을 조금 바꾸어 다시 시도해 주세요."
+            return jsonify({"reply": reply})
 
         prompt = build_recommendation_prompt(keywords, preferences, filtered)
         reply = get_gpt_reply(prompt)
@@ -92,21 +136,15 @@ def build_company_list_from_job_api(keyword, rows=20):
 
 def filter_companies(companies, interest, region, salary):
     filtered = []
-
     for c in companies:
-        tags_text = " ".join(c["tags"])
+        combined_tags = " ".join(c["tags"])
+        if interest and interest not in combined_tags:
+            continue
+        if region and region not in combined_tags:
+            continue
+        filtered.append(c)
+    return filtered[:3] if filtered else companies[:3]  # 조건 없으면 더미 3개라도 리턴
 
-        match_count = 0
-        if interest and interest in tags_text:
-            match_count += 1
-        if region and region in tags_text:
-            match_count += 1
-
-        if match_count > 0 or (not interest and not region):
-            filtered.append(c)
-
-    # 아무것도 안 걸렸을 때는 상위 3개 반환 (fallback)
-    return filtered[:3] if filtered else companies[:3]
 def compute_similarity(text1, text2):
     try:
         emb1 = client.embeddings.create(input=text1, model="text-embedding-ada-002").data[0].embedding
@@ -121,16 +159,20 @@ def compute_similarity(text1, text2):
 def build_recommendation_prompt(keywords, preferences, companies):
     company_str = "\n".join([f"- {c['name']} ({', '.join(c['tags'])})" for c in companies])
     return (
-        f"[사용자 정보]\n키워드: {', '.join(keywords)}\n선호: {', '.join([p for p in preferences if p])}\n\n"
+        f"{SYSTEM_PROMPT}\n\n"
+        f"[사용자 정보]\n- 키워드: {', '.join(keywords)}\n- 선호: {', '.join([p for p in preferences if p])}\n\n"
         f"[추천 기업 리스트]\n{company_str}\n\n"
-        f"이 사용자에게 위 기업들이 왜 적합한지 챗봇 시점에서 객관적으로 설명해줘. 사용자 입장이 아니라 분석자 입장에서 써줘."
+        f"각 기업이 사용자에게 왜 적합한지 GPT 입장에서 설명해줘. 자기소개서처럼 말하지 마." 
     )
 
 def get_gpt_reply(prompt):
     try:
         response = client.chat.completions.create(
             model="gpt-4-1106-preview",
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt}
+            ],
             temperature=0.5
         )
         return response.choices[0].message.content
