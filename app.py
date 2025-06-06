@@ -3,7 +3,6 @@ import os, re, requests, xml.etree.ElementTree as ET
 from dotenv import load_dotenv
 from functools import lru_cache
 from openai import OpenAI
-import traceback
 
 load_dotenv()
 client = OpenAI()
@@ -25,22 +24,20 @@ def chat():
         keywords = extract_keywords(resume)
         user_prefs = extract_user_preferences(user_input)
 
-        print("📌 추출된 키워드:", keywords)
-        print("📌 추출된 사용자 선호:", user_prefs)
-
         companies = build_company_list_from_job_api("개발")
         match = match_company_to_user(companies, keywords, user_prefs)
 
+        # fallback 매칭 없을 때 더미 기업으로 진행
         if not match:
-            return jsonify({"reply": "❌ 기업 정보를 불러오지 못했습니다. 나중에 다시 시도해주세요."})
+            print("⚠️ 기업 매칭 실패. 더미 기업으로 대체합니다.")
+            match = {"name": "더미기업", "tags": ["기술", "진주", "인공지능"]}
 
         prompt = build_explanation_prompt(keywords, user_prefs, match)
         reply = get_gpt_reply(prompt)
 
         return jsonify({"reply": reply})
     except Exception as e:
-        print("❌ 서버 오류 발생:")
-        traceback.print_exc()
+        print("❌ 서버 오류:", str(e))
         return jsonify({"reply": f"❌ 서버 오류: {str(e)}"}), 500
 
 def extract_resume_text(text):
@@ -57,16 +54,14 @@ def extract_keywords(text):
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3
         )
-        content = response.choices[0].message.content if response.choices else ""
-        print("📌 GPT 키워드 응답:", content)
-        return [kw.strip() for kw in content.split(",") if kw.strip()]
+        return [kw.strip() for kw in response.choices[0].message.content.split(",")]
     except Exception as e:
         print("❌ 키워드 추출 실패:", e)
-        return ["개발", "문제해결", "팀워크"]
+        return []
 
 @lru_cache(maxsize=100)
 def build_company_list_from_job_api(keyword, rows=10):
-    url = "https://118.67.151.173/data/api/jopblancApi.do"
+    url = "https://118.67.151.173/data/api/jopblancApi.do"  # 또는 프록시 주소
     params = {
         "authKey": job_api_key,
         "callTp": "L",
@@ -88,6 +83,8 @@ def build_company_list_from_job_api(keyword, rows=10):
                 tags += item.findtext("pblancSj", "").split()
                 companies.append({"name": name, "tags": [t for t in tags if t]})
             return companies
+        else:
+            print("❌ API 응답 상태코드:", response.status_code)
     except Exception as e:
         print("❌ API 오류:", e)
 
@@ -102,7 +99,7 @@ def compute_similarity(text1, text2):
         norm2 = sum(y * y for y in emb2) ** 0.5
         return dot / (norm1 * norm2)
     except Exception as e:
-        print("❌ 유사도 계산 오류:", e)
+        print("❌ 임베딩 유사도 계산 실패:", e)
         return 0.0
 
 def match_company_to_user(companies, user_keywords, user_prefs):
@@ -110,7 +107,6 @@ def match_company_to_user(companies, user_keywords, user_prefs):
     best, best_score = None, -1
     for company in companies:
         score = compute_similarity(user_text, " ".join(company["tags"]))
-        print(f"🔍 {company['name']} 유사도: {score}")
         if score > best_score:
             best, best_score = company, score
     return best
@@ -129,11 +125,9 @@ def get_gpt_reply(prompt):
             messages=[{"role": "user", "content": prompt}],
             temperature=0.5
         )
-        reply = response.choices[0].message.content
-        print("📌 GPT 설명 응답:", reply)
-        return reply
+        return response.choices[0].message.content
     except Exception as e:
-        print("❌ GPT 응답 오류:", e)
+        print("❌ GPT 응답 실패:", e)
         return f"❌ GPT 응답 오류: {str(e)}"
 
 if __name__ == "__main__":
