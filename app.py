@@ -1,16 +1,16 @@
 from flask import Flask, request, jsonify, render_template
-import os, re, requests, xml.etree.ElementTree as ET
+import os, re, json, requests, xml.etree.ElementTree as ET
 from dotenv import load_dotenv
 from functools import lru_cache
 from openai import OpenAI
 
 load_dotenv()
+app = Flask(__name__)
 client = OpenAI()
 
-app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY")
-assistant_id = os.getenv("ASSISTANT_ID")
 job_api_key = os.getenv("JOB_API_KEY")
+assistant_id = os.getenv("ASSISTANT_ID")
 
 @app.route("/")
 def home():
@@ -20,24 +20,26 @@ def home():
 def chat():
     try:
         user_input = request.form.get("message", "")
+        user_interest = request.form.get("interest", "").strip()
+        user_region = request.form.get("region", "").strip()
+        user_salary = request.form.get("salary", "").strip()
+
         resume = extract_resume_text(user_input)
         keywords = extract_keywords(resume)
-        user_prefs = extract_user_preferences(user_input)
+        preferences = extract_user_preferences(user_input) + [user_interest, user_region, user_salary]
+        preferences = [p for p in preferences if p]  # 빈 문자열 제거
 
-        companies = build_company_list_from_job_api("개발")
-        match = match_company_to_user(companies, keywords, user_prefs)
+        companies = build_company_list_from_job_api("개발") or load_dummy_companies()
+        matched = match_top_companies(companies, keywords + preferences)
 
-        # fallback 매칭 없을 때 더미 기업으로 진행
-        if not match:
-            print("⚠️ 기업 매칭 실패. 더미 기업으로 대체합니다.")
-            match = {"name": "더미기업", "tags": ["기술", "진주", "인공지능"]}
+        if not matched:
+            return jsonify({"reply": "❌ 조건에 맞는 기업 정보를 찾지 못했습니다. 입력 조건을 줄여 다시 시도해보세요."})
 
-        prompt = build_explanation_prompt(keywords, user_prefs, match)
+        prompt = build_explanation_prompt(keywords, preferences, matched)
         reply = get_gpt_reply(prompt)
-
         return jsonify({"reply": reply})
+
     except Exception as e:
-        print("❌ 서버 오류:", str(e))
         return jsonify({"reply": f"❌ 서버 오류: {str(e)}"}), 500
 
 def extract_resume_text(text):
@@ -54,14 +56,13 @@ def extract_keywords(text):
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3
         )
-        return [kw.strip() for kw in response.choices[0].message.content.split(",")]
+        return [kw.strip() for kw in response.choices[0].message.content.split(",") if kw.strip()]
     except Exception as e:
         print("❌ 키워드 추출 실패:", e)
         return []
 
-@lru_cache(maxsize=100)
-def build_company_list_from_job_api(keyword, rows=10):
-    url = "https://118.67.151.173/data/api/jopblancApi.do"  # 또는 프록시 주소
+def build_company_list_from_job_api(keyword, rows=20):
+    url = "https://118.67.151.173/data/api/jopblancApi.do"
     params = {
         "authKey": job_api_key,
         "callTp": "L",
@@ -78,17 +79,33 @@ def build_company_list_from_job_api(keyword, rows=10):
                 tags = [
                     item.findtext("areaStr", ""),
                     item.findtext("emplymStleSeStr", ""),
-                    item.findtext("dtyStr", "")
+                    item.findtext("dtyStr", ""),
+                    item.findtext("pblancSj", "")
                 ]
-                tags += item.findtext("pblancSj", "").split()
-                companies.append({"name": name, "tags": [t for t in tags if t]})
+                tags = [t for t in " ".join(tags).split() if t]
+                companies.append({"name": name, "tags": tags})
             return companies
-        else:
-            print("❌ API 응답 상태코드:", response.status_code)
     except Exception as e:
         print("❌ API 오류:", e)
+    return None
 
-    return [{"name": "더미기업", "tags": ["개발", "진주", "기술"]}]
+def load_dummy_companies():
+    try:
+        with open("dummy_companies.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print("❌ 더미 데이터 불러오기 실패:", e)
+        return [{"name": "더미기업", "tags": ["개발", "진주", "기술"]}]
+
+def match_top_companies(companies, user_profile, top_n=3):
+    results = []
+    user_text = " ".join(user_profile)
+    for company in companies:
+        comp_text = " ".join(company.get("tags", []))
+        score = compute_similarity(user_text, comp_text)
+        results.append((company, score))
+    results.sort(key=lambda x: x[1], reverse=True)
+    return [r[0] for r in results[:top_n] if r[1] > 0.1]
 
 def compute_similarity(text1, text2):
     try:
@@ -99,23 +116,18 @@ def compute_similarity(text1, text2):
         norm2 = sum(y * y for y in emb2) ** 0.5
         return dot / (norm1 * norm2)
     except Exception as e:
-        print("❌ 임베딩 유사도 계산 실패:", e)
+        print("❌ 임베딩 오류:", e)
         return 0.0
 
-def match_company_to_user(companies, user_keywords, user_prefs):
-    user_text = " ".join(user_keywords + user_prefs)
-    best, best_score = None, -1
-    for company in companies:
-        score = compute_similarity(user_text, " ".join(company["tags"]))
-        if score > best_score:
-            best, best_score = company, score
-    return best
-
-def build_explanation_prompt(keywords, preferences, company):
+def build_explanation_prompt(keywords, preferences, companies):
+    company_list = "\n".join([f"- {c['name']} ({', '.join(c['tags'])})" for c in companies])
     return (
-        f"다음 사용자 정보와 추천 기업을 기반으로, 왜 이 기업이 적합한지 설명해주세요.\n\n"
+        "너는 지금부터 사용자의 특성과 선호도를 파악해 가장 적합한 기업을 추천해주는 역할을 수행한다. 다음 지침을 따르라:\n\n"
+        "1. 분석 실패 시에는 '현재 정보만으로는 분석이 어렵습니다' 등 자연스럽게 안내하고 시스템 문구는 금지한다.\n"
+        "2. 아래 사용자 정보와 기업 리스트를 참고해 추천 이유를 설명한다.\n\n"
         f"[사용자 정보]\n- 키워드: {', '.join(keywords)}\n- 선호: {', '.join(preferences)}\n\n"
-        f"[추천 기업]\n- 기업명: {company['name']}\n- 태그: {', '.join(company['tags'])}"
+        f"[추천 기업 후보]\n{company_list}\n\n"
+        "각 기업이 왜 사용자에게 적합한지 분석해서 자연스럽게 설명해줘."
     )
 
 def get_gpt_reply(prompt):
@@ -125,9 +137,8 @@ def get_gpt_reply(prompt):
             messages=[{"role": "user", "content": prompt}],
             temperature=0.5
         )
-        return response.choices[0].message.content
+        return response.choices[0].message.content.strip()
     except Exception as e:
-        print("❌ GPT 응답 실패:", e)
         return f"❌ GPT 응답 오류: {str(e)}"
 
 if __name__ == "__main__":
