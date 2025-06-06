@@ -18,7 +18,9 @@ def extract_keywords(text):
     try:
         response = client.chat.completions.create(
             model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
             temperature=0.7
         )
         keywords = response.choices[0].message.content.strip()
@@ -83,14 +85,21 @@ def index():
         if not user_input.strip():
             return render_template("index.html", response="입력된 내용이 없습니다.")
 
-        if len(user_input.strip()) < 10:
+        # 너무 짧은 인삿말은 분석 제외
+        if len(user_input.replace("\n", "").replace(" ", "").strip()) < 10:
             return render_template("index.html", response="안녕하세요! 원하시는 직무나 관심 분야, 또는 자기소개서를 입력해 주시면 맞춤 기업을 추천해드릴게요.")
 
+        # 1. 키워드 추출
         keywords = extract_keywords(user_input)
         keyword_str = ", ".join(keywords)
+
+        # 2. 사용자 임베딩 생성
         user_embedding = get_embedding(user_input)
+
+        # 3. 기업 정보 가져오기
         companies = get_companies(query=keywords[0] if keywords else "개발")
 
+        # 4. 기업 임베딩 및 유사도 계산
         scored_companies = []
         for company in companies:
             description = company.get("description", "")
@@ -98,24 +107,21 @@ def index():
             score = cosine_similarity(user_embedding, company_embedding)
             scored_companies.append({"company": company, "score": score})
 
+        # 5. 상위 3개 기업 선택
         top_companies = sorted(scored_companies, key=lambda x: x["score"], reverse=True)[:3]
 
-        # ⬇ 프롬프트 길이 최소화를 위해 설명 길이 자르기
-        top_descriptions = [
-            f"{c['company']['name']} - {c['company']['description'][:200]}"
-            for c in top_companies
-        ]
-
+        # 6. GPT에게 설명 요청
+        top_descriptions = [f"{c['company']['name']} - {c['company']['description']}" for c in top_companies]
         final_prompt = f"""
-다음은 사용자의 자기소개서 키워드를 기반으로 유사도가 높은 기업 3곳입니다. 왜 이 기업들이 적합한지 간단히 설명해주세요.
+다음은 사용자의 자기소개서와 유사한 상위 3개 기업입니다. 각 기업이 사용자에게 적합한 이유를 2~3문장으로 요약해서 자연스럽게 설명해줘.
 
-키워드: {keyword_str}
+자기소개서 키워드: {keyword_str}
 
-기업:
+기업 목록:
 {chr(10).join(top_descriptions)}
 """
-
         explanation = get_gpt_reply(final_prompt)
+
         return render_template("index.html", response=explanation)
 
     return render_template("index.html")
