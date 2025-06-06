@@ -12,9 +12,10 @@
       display: flex;
       justify-content: center;
     }
+
     #chatContainer {
       width: 100%;
-      max-width: 700px;
+      max-width: 600px;
       background: white;
       border-radius: 10px;
       padding: 20px;
@@ -22,6 +23,7 @@
       display: flex;
       flex-direction: column;
     }
+
     #chatBox {
       display: flex;
       flex-direction: column;
@@ -33,6 +35,7 @@
       max-height: 500px;
       overflow-y: auto;
     }
+
     .message {
       padding: 10px 15px;
       border-radius: 15px;
@@ -40,30 +43,35 @@
       word-wrap: break-word;
       white-space: pre-wrap;
     }
+
     .user {
       background: #d1e7dd;
       align-self: flex-end;
     }
+
     .gpt {
       background: #e2e3e5;
       align-self: flex-start;
     }
+
     #inputArea {
       display: flex;
       flex-direction: column;
       margin-top: 15px;
       gap: 10px;
     }
-    textarea, input[type="text"] {
+
+    #userInput, #interestInput, #regionInput, #salaryInput {
       padding: 10px;
       font-size: 16px;
       border-radius: 5px;
       border: 1px solid #ccc;
     }
-    label {
-      font-weight: bold;
-      margin-top: 10px;
+
+    #fileInput {
+      border: none;
     }
+
     #sendBtn {
       padding: 10px;
       font-size: 16px;
@@ -75,6 +83,7 @@
       width: 100px;
       align-self: flex-end;
     }
+
     #sendBtn:hover {
       background-color: #45a049;
     }
@@ -84,21 +93,14 @@
   <div id="chatContainer">
     <h2>ChatEM</h2>
     <div id="chatBox">
-      <div class="message gpt">안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊<br>자기소개서나 이력서를 입력하거나 첨부해 주세요.</div>
+      <div class="message gpt">안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊<br>자기소개서나 이력서를 첨부해주시면 더 정확한 추천이 가능해요!</div>
     </div>
 
     <div id="inputArea">
-      <textarea id="userInput" placeholder="자기소개서나 메시지를 입력하세요..." rows="5"></textarea>
-
-      <label for="interest">관심 분야 (선택)</label>
-      <input type="text" id="interest" placeholder="예: 자율주행, AI, 경영">
-
-      <label for="region">희망 지역 (선택)</label>
-      <input type="text" id="region" placeholder="예: 진주, 서울">
-
-      <label for="salary">희망 연봉 (선택)</label>
-      <input type="text" id="salary" placeholder="예: 3000만원">
-
+      <textarea id="userInput" placeholder="자기소개서 또는 메시지를 입력하세요..." rows="3"></textarea>
+      <input type="text" id="interestInput" placeholder="관심 분야 (선택사항)" />
+      <input type="text" id="regionInput" placeholder="희망 지역 (선택사항)" />
+      <input type="text" id="salaryInput" placeholder="희망 연봉 (선택사항)" />
       <input type="file" id="fileInput" />
       <button id="sendBtn" onclick="sendMessage()">보내기</button>
     </div>
@@ -108,19 +110,29 @@
     const input = document.getElementById("userInput");
     const chatBox = document.getElementById("chatBox");
     const fileInput = document.getElementById("fileInput");
+    const interestInput = document.getElementById("interestInput");
+    const regionInput = document.getElementById("regionInput");
+    const salaryInput = document.getElementById("salaryInput");
+
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
 
     async function sendMessage() {
       const message = input.value.trim();
       const file = fileInput.files[0];
-      const interest = document.getElementById("interest").value.trim();
-      const region = document.getElementById("region").value.trim();
-      const salary = document.getElementById("salary").value.trim();
+      const interest = interestInput.value.trim();
+      const region = regionInput.value.trim();
+      const salary = salaryInput.value.trim();
 
       if (!message && !file) return;
 
       const userDiv = document.createElement("div");
       userDiv.className = "message user";
-      userDiv.innerText = message || `[파일 업로드됨: ${file.name}]`;
+      userDiv.innerText = message || `[이력서/자기소개서 업로드됨: ${file.name}]`;
       chatBox.appendChild(userDiv);
 
       const loadingDiv = document.createElement("div");
@@ -140,17 +152,29 @@
           method: "POST",
           body: formData,
         });
-        const data = await response.json();
-        loadingDiv.innerText = data.reply;
+
+        const contentType = response.headers.get("content-type") || "";
+
+        if (!response.ok) {
+          throw new Error(`서버 응답 오류: ${response.status}`);
+        }
+
+        if (contentType.includes("application/json")) {
+          const data = await response.json();
+          loadingDiv.innerText = data.reply;
+        } else {
+          const text = await response.text();
+          loadingDiv.innerText = "❌ 예상치 못한 응답 형식:\n" + text;
+        }
       } catch (err) {
         loadingDiv.innerText = "❌ 오류 발생: " + err.message;
       }
 
       input.value = "";
+      interestInput.value = "";
+      regionInput.value = "";
+      salaryInput.value = "";
       fileInput.value = null;
-      document.getElementById("interest").value = "";
-      document.getElementById("region").value = "";
-      document.getElementById("salary").value = "";
       input.focus();
       chatBox.scrollTop = chatBox.scrollHeight;
     }
