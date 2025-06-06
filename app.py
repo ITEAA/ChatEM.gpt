@@ -1,161 +1,144 @@
-from flask import Flask, request, jsonify, render_template
 import os
-import re
 import json
-import time
 import requests
-import xml.etree.ElementTree as ET
-from functools import lru_cache
-from dotenv import load_dotenv
+from flask import Flask, request, render_template
 from openai import OpenAI
-
-load_dotenv()
-client = OpenAI()
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY")
-job_api_key = os.getenv("JOB_API_KEY")
-PROXY_URL = "http://127.0.0.1:5001/proxy"
 
-@app.route("/")
-def home():
-    return render_template("index.html")
-
-@app.route("/chat", methods=["POST"])
-def chat():
-    try:
-        user_input = request.form.get("message", "").strip()
-
-        if len(user_input) < 30 or not contains_resume_hint(user_input):
-            return jsonify({"reply": "안녕하세요! 👋\n자기소개서나 관심 분야를 입력해 주세요. 파일도 첨부 가능해요!"})
-
-        resume = extract_resume_text(user_input)
-        keywords = extract_keywords(resume)
-        user_prefs = extract_user_preferences(user_input)
-        companies = build_company_list_from_job_api("개발")
-        match = match_company_to_user(companies, keywords, user_prefs)
-        prompt = build_explanation_prompt(keywords, user_prefs, match)
-        reply = get_gpt_reply(prompt)
-        return jsonify({"reply": reply})
-
-    except Exception as e:
-        return jsonify({"reply": f"❌ 서버 오류: {str(e)}"}), 500
-
-def contains_resume_hint(text):
-    hints = ["자기소개서", "이력서", "지원동기", "경력", "프로젝트", "학력"]
-    return any(h in text for h in hints)
-
-def extract_resume_text(text):
-    return text
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def extract_keywords(text):
-    if len(text.strip()) < 10:
-        return ["개발", "팀워크"]
-    prompt = f"다음 자기소개서에서 핵심 기술, 직무, 경험 키워드를 쉼표로 추출해줘:\n{text}"
+    prompt = f"""
+다음 자기소개서에서 핵심 키워드 5개를 추출해줘. 각 키워드는 1~3단어 이내로 하고, 쉼표로 구분해서 출력해줘.
+
+{text}
+"""
     try:
         response = client.chat.completions.create(
-            model="gpt-4-1106-preview",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3
+            model="gpt-4",
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7
         )
-        return [kw.strip() for kw in response.choices[0].message.content.split(",")]
+        keywords = response.choices[0].message.content.strip()
+        return [k.strip() for k in keywords.split(",") if k.strip()]
     except Exception as e:
-        print("❌ 키워드 추출 실패:", e)
-        return ["개발", "팀워크", "문제해결"]
-
-def extract_user_preferences(text):
-    prefs = re.findall(r"\d+\.\s*([^\n]*)", text)
-    return [p.strip() for p in prefs]
-
-@lru_cache(maxsize=100)
-def build_company_list_from_job_api(keyword, rows=10):
-    params = {
-        "authKey": job_api_key,
-        "callTp": "L",
-        "listCount": rows,
-        "query": keyword
-    }
-    try:
-        response = requests.get(PROXY_URL, params=params, timeout=10)
-        if response.status_code == 200:
-            companies = []
-            root = ET.fromstring(response.content)
-            for item in root.findall(".//jobList"):
-                name = item.findtext("entrprsNm", "기업명 없음")
-                area = item.findtext("areaStr", "")
-                style = item.findtext("emplymStleSeStr", "")
-                duty = item.findtext("dtyStr", "")
-                title = item.findtext("pblancSj", "")
-                tags = [t for t in [area, style, duty] if t] + title.split()
-                companies.append({"name": name, "tags": tags})
-            if companies:
-                return companies
-    except Exception as e:
-        print("❌ API 프록시 요청 실패:", str(e))
-
-    print("⚠️ API 실패. 더미 기업 리스트 사용.")
-    return load_dummy_companies_from_file()
-
-def load_dummy_companies_from_file():
-    try:
-        with open("dummy_companies.json", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        print("❌ 더미 데이터 로딩 실패:", e)
+        print(f"❌ 키워드 추출 오류: {e}")
         return []
 
-def compute_similarity(text1, text2):
+def get_embedding(text):
     try:
-        emb1 = client.embeddings.create(input=text1, model="text-embedding-ada-002").data[0].embedding
-        emb2 = client.embeddings.create(input=text2, model="text-embedding-ada-002").data[0].embedding
-        return cosine_similarity(emb1, emb2)
+        response = client.embeddings.create(
+            model="text-embedding-ada-002",
+            input=text
+        )
+        return response.data[0].embedding
     except Exception as e:
-        print("❌ 유사도 계산 실패:", str(e))
+        print(f"❌ 임베딩 생성 오류: {e}")
+        return []
+
+def cosine_similarity(vec1, vec2):
+    try:
+        dot = sum(a * b for a, b in zip(vec1, vec2))
+        norm1 = sum(a * a for a in vec1) ** 0.5
+        norm2 = sum(b * b for b in vec2) ** 0.5
+        return dot / (norm1 * norm2) if norm1 and norm2 else 0.0
+    except:
         return 0.0
 
-def cosine_similarity(a, b):
-    dot = sum(x * y for x, y in zip(a, b))
-    norm_a = sum(x * x for x in a) ** 0.5
-    norm_b = sum(y * y for y in b) ** 0.5
-    return dot / (norm_a * norm_b)
+def load_dummy_companies():
+    try:
+        with open("dummy_companies.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return []
 
-def match_company_to_user(companies, user_keywords, user_prefs):
-    user_text = " ".join(user_keywords + user_prefs)
-    best = None
-    best_score = -1
-    for company in companies:
-        company_text = " ".join(company["tags"])
-        score = compute_similarity(user_text, company_text)
-        if score > best_score:
-            best = company
-            best_score = score
-    return best or (companies[0] if companies else None)
-
-def build_explanation_prompt(keywords, preferences, company, job_summary=""):
-    base = f"다음 사용자 정보와 추천 기업을 기반으로, 왜 이 기업이 적합한지 설명해주세요.\n\n"
-    base += f"[사용자 정보]\n- 키워드: {', '.join(keywords)}\n- 선호: {', '.join(preferences)}\n\n"
-    if company is None:
-        base += "[추천 기업 정보 없음]\n- 기업 추천에 실패했습니다."
-        return base
-    base += f"[추천 기업]\n- 기업명: {company['name']}\n- 태그: {', '.join(company['tags'])}"
-    if job_summary:
-        base += f"\n\n[채용공고]\n{job_summary}"
-    return base
+def get_companies(query):
+    try:
+        # ⚠️ 지금은 API 연결이 안 되므로 강제로 예외를 발생시켜 더미 기업만 사용
+        raise Exception("프록시 서버 비활성화로 API 생략")
+        # 아래는 추후 프록시 서버 연동 시 사용
+        # params = {
+        #     "authKey": os.getenv("JOB_API_KEY"),
+        #     "callTp": "L",
+        #     "listCount": 10,
+        #     "query": query
+        # }
+        # response = requests.get("http://127.0.0.1:5001/proxy", params=params, timeout=5)
+        # if response.status_code == 200:
+        #     return response.json().get("items", [])
+        # else:
+        #     print("❌ API 응답 실패, 상태 코드:", response.status_code)
+        #     return load_dummy_companies()
+    except Exception as e:
+        print(f"❌ API 프록시 요청 실패: {e}")
+        print("⚠️ API 실패. 더미 기업 리스트 사용.")
+        return load_dummy_companies()
 
 def get_gpt_reply(prompt):
     try:
-        print("🧪 GPT 호출 시작. 프롬프트 일부:", prompt[:100])
+        print("🧪 GPT 프롬프트 길이:", len(prompt))
         response = client.chat.completions.create(
-            model="gpt-4-1106-preview",
+            model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.5
+            temperature=0.8,
         )
-        print("✅ GPT 응답 수신 완료")
-        return response.choices[0].message.content
+        return response.choices[0].message.content.strip()
     except Exception as e:
-        print("❌ GPT 응답 오류:", str(e))
-        return "❌ GPT 응답에 실패했습니다. 나중에 다시 시도해주세요."
+        print("❌ GPT 응답 오류:", e)
+        return "죄송합니다. 현재 추천을 제공할 수 없습니다."
+
+@app.route("/", methods=["GET", "POST"])
+def index():
+    if request.method == "POST":
+        user_input = request.form.get("user_input", "")
+
+        if not user_input.strip():
+            return render_template("index.html", response="입력된 내용이 없습니다.")
+
+        # 대화용 입력만 했을 때 처리
+        if len(user_input.strip()) < 10:
+            return render_template("index.html", response="안녕하세요! 원하시는 직무나 관심 분야, 또는 자기소개서를 입력해 주시면 맞춤 기업을 추천해드릴게요.")
+
+        # 1. 키워드 추출
+        keywords = extract_keywords(user_input)
+        keyword_str = ", ".join(keywords)
+
+        # 2. 사용자 임베딩 생성
+        user_embedding = get_embedding(user_input)
+
+        # 3. 기업 정보 가져오기 (더미 or API)
+        companies = get_companies(query=keywords[0] if keywords else "개발")
+
+        # 4. 기업 임베딩 및 유사도 계산
+        scored_companies = []
+        for company in companies:
+            description = company.get("description", "")
+            company_embedding = get_embedding(description)
+            score = cosine_similarity(user_embedding, company_embedding)
+            scored_companies.append({"company": company, "score": score})
+
+        # 5. 상위 3개 기업 선택
+        top_companies = sorted(scored_companies, key=lambda x: x["score"], reverse=True)[:3]
+
+        # 6. GPT에게 설명 요청
+        top_descriptions = [f"{c['company']['name']} - {c['company']['description']}" for c in top_companies]
+        final_prompt = f"""
+다음은 사용자의 자기소개서와 유사한 상위 3개 기업입니다. 각 기업이 사용자에게 적합한 이유를 2~3문장으로 요약해서 자연스럽게 설명해줘.
+
+자기소개서 키워드: {keyword_str}
+
+기업 목록:
+{chr(10).join(top_descriptions)}
+"""
+        explanation = get_gpt_reply(final_prompt)
+
+        return render_template("index.html", response=explanation)
+
+    return render_template("index.html")
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    app.run(debug=True)
