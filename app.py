@@ -32,7 +32,7 @@ def extract_keywords(text):
     """
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4
         )
@@ -40,6 +40,7 @@ def extract_keywords(text):
         keywords = [kw.strip() for kw in result.split(",") if kw.strip()]
         return keywords
     except Exception as e:
+        print(f"❌ GPT 호출 에러: {e}")
         return []
 
 def match_companies(keywords, interest=None, region=None, salary=None):
