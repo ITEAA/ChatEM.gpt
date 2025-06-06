@@ -92,15 +92,21 @@ def build_company_list_from_job_api(keyword, rows=20):
 
 def filter_companies(companies, interest, region, salary):
     filtered = []
-    for c in companies:
-        combined_tags = " ".join(c["tags"])
-        if interest and interest not in combined_tags:
-            continue
-        if region and region not in combined_tags:
-            continue
-        filtered.append(c)
-    return filtered[:3]
 
+    for c in companies:
+        tags_text = " ".join(c["tags"])
+
+        match_count = 0
+        if interest and interest in tags_text:
+            match_count += 1
+        if region and region in tags_text:
+            match_count += 1
+
+        if match_count > 0 or (not interest and not region):
+            filtered.append(c)
+
+    # 아무것도 안 걸렸을 때는 상위 3개 반환 (fallback)
+    return filtered[:3] if filtered else companies[:3]
 def compute_similarity(text1, text2):
     try:
         emb1 = client.embeddings.create(input=text1, model="text-embedding-ada-002").data[0].embedding
