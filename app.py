@@ -9,7 +9,6 @@ from functools import lru_cache
 from dotenv import load_dotenv
 from openai import OpenAI
 
-# Load environment variables
 load_dotenv()
 client = OpenAI()
 
@@ -25,23 +24,26 @@ def home():
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
-        user_input = request.form.get("message", "")
+        user_input = request.form.get("message", "").strip()
+
+        if len(user_input) < 30 or not contains_resume_hint(user_input):
+            return jsonify({"reply": "안녕하세요! 👋\n자기소개서나 관심 분야를 입력해 주세요. 파일도 첨부 가능해요!"})
+
         resume = extract_resume_text(user_input)
         keywords = extract_keywords(resume)
         user_prefs = extract_user_preferences(user_input)
-
         companies = build_company_list_from_job_api("개발")
         match = match_company_to_user(companies, keywords, user_prefs)
-
-        if not match:
-            return jsonify({"reply": "❌ 기업 정보를 불러오지 못했습니다. 나중에 다시 시도해주세요."})
-
         prompt = build_explanation_prompt(keywords, user_prefs, match)
         reply = get_gpt_reply(prompt)
-
         return jsonify({"reply": reply})
+
     except Exception as e:
         return jsonify({"reply": f"❌ 서버 오류: {str(e)}"}), 500
+
+def contains_resume_hint(text):
+    hints = ["자기소개서", "이력서", "지원동기", "경력", "프로젝트", "학력"]
+    return any(h in text for h in hints)
 
 def extract_resume_text(text):
     return text
@@ -62,7 +64,7 @@ def extract_keywords(text):
         return ["개발", "팀워크", "문제해결"]
 
 def extract_user_preferences(text):
-    prefs = re.findall(r"\d+\\.?\s*([^\\n]*)", text)
+    prefs = re.findall(r"\d+\.\s*([^\n]*)", text)
     return [p.strip() for p in prefs]
 
 @lru_cache(maxsize=100)
@@ -89,7 +91,7 @@ def build_company_list_from_job_api(keyword, rows=10):
             if companies:
                 return companies
     except Exception as e:
-        print("❌ API 프록시 요청 실패:", e)
+        print("❌ API 프록시 요청 실패:", str(e))
 
     print("⚠️ API 실패. 더미 기업 리스트 사용.")
     return load_dummy_companies_from_file()
@@ -142,11 +144,13 @@ def build_explanation_prompt(keywords, preferences, company, job_summary=""):
 
 def get_gpt_reply(prompt):
     try:
+        print("🧪 GPT 호출 시작. 프롬프트 일부:", prompt[:100])
         response = client.chat.completions.create(
             model="gpt-4-1106-preview",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.5
         )
+        print("✅ GPT 응답 수신 완료")
         return response.choices[0].message.content
     except Exception as e:
         print("❌ GPT 응답 오류:", str(e))
