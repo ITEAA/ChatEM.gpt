@@ -5,31 +5,30 @@ import openai
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
-from difflib import SequenceMatcher
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 app = Flask(__name__)
 CORS(app)
 
-# OpenAI API 커ㅇ 설정
 openai.api_key = os.getenv("OPENAI_API_KEY") or "your-api-key"
+
+# 전역 상태 딕셔너리 (테스트용)
+user_states = {}
 
 # 기업 데이터 로드
 with open("jinju_companies.json", "r", encoding="utf-8") as f:
     company_data = json.load(f)
 
-# PDF 텍스트 추출
 def extract_text_from_pdf(pdf_file):
     doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
     text = "\n".join(page.get_text() for page in doc)
     return text.strip()
 
-# GPT 키워드 추출
 def extract_keywords(text):
     prompt = f"""
-    다음 자기소개서 또는 이력서에서 해상 키워드를 추출해줘.
-    - 5~10개 정도 붓아줘.
+    다음 자기소개서 또는 이력서에서 핵심 키워드를 추출해줘.
+    - 5~10개 정도 뽑아줘.
     - 키워드는 콤마(,)로 구분해서 출력해줘.
 
     내용:
@@ -48,7 +47,6 @@ def extract_keywords(text):
         print(f"❌ GPT 호출 에러: {e}")
         return []
 
-# TF-IDF 기반 유사도 배열
 def tfidf_similarity(user_text, companies):
     documents = [user_text] + [c.get("summary", "") for c in companies]
     tfidf = TfidfVectorizer().fit_transform(documents)
@@ -56,7 +54,6 @@ def tfidf_similarity(user_text, companies):
     scored = sorted(zip(cosine_sim, companies), key=lambda x: x[0], reverse=True)
     return [c for score, c in scored if score > 0.1][:3]
 
-# 조건 기반 필터링
 def filter_companies(keywords, interest=None, region=None, salary=None):
     filtered = []
     for company in company_data:
@@ -69,7 +66,6 @@ def filter_companies(keywords, interest=None, region=None, salary=None):
         filtered.append(company)
     return filtered
 
-# GPT 추천 이유 생성
 def generate_reason(user_text, companies):
     prompt = f"""
     다음 자기소개서를 참고해서 아래의 기업들을 추천하는 이유를 간단히 설명해줘.
@@ -80,7 +76,7 @@ def generate_reason(user_text, companies):
     기업 목록:
     {json.dumps(companies, ensure_ascii=False)}
 
-    결과는 각 기업에 대해 "기업명: 추천 사유" 형식으로 출력해줘.
+    결과는 각 기업에 대해 \"기업명: 추천 사유\" 형식으로 출력해줘.
     """
     try:
         response = openai.chat.completions.create(
@@ -99,27 +95,39 @@ def index():
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    message = request.form.get("message", "")
+    user_id = request.remote_addr  # 사용자 구분 ID (간단 버전)
+    message = request.form.get("message", "").strip()
     interest = request.form.get("interest", "").strip()
     region = request.form.get("region", "").strip()
     salary = request.form.get("salary", "").strip()
     file = request.files.get("file")
 
+    state = user_states.get(user_id, {})
+
     try:
+        # Step 0: 파일 업로드 or 메시지 입력
         if file:
             user_text = extract_text_from_pdf(file)
-        else:
-            user_text = message
+            state = {"step": 1, "user_text": user_text}
+            user_states[user_id] = state
+        elif message and not state.get("user_text"):
+            state = {"step": 1, "user_text": message}
+            user_states[user_id] = state
 
-        if not user_text:
-            return jsonify({"reply": "자기소개서나 메시지를 입력해 주세요."})
+        # Step 1: 정보 수집 (관심 분야, 지역)
+        if state.get("step") == 1:
+            state.update({"interest": interest, "region": region, "salary": salary})
 
-        keywords = extract_keywords(user_text)
-        filtered = filter_companies(keywords, interest, region, salary)
-        matched = tfidf_similarity(user_text, filtered)
-        explanation = generate_reason(user_text, matched)
+            keywords = extract_keywords(state["user_text"])
+            filtered = filter_companies(keywords, interest, region, salary)
+            matched = tfidf_similarity(state["user_text"], filtered)
+            explanation = generate_reason(state["user_text"], matched)
 
-        return jsonify({"reply": explanation})
+            user_states.pop(user_id, None)
+
+            return jsonify({"reply": explanation})
+
+        return jsonify({"reply": "자기소개서 또는 메시지를 먼저 입력해 주세요."})
 
     except Exception as e:
         print(f"❌ 서버 에러: {e}")
