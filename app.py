@@ -46,6 +46,8 @@ def extract_keywords(text):
         return []
 
 def tfidf_similarity(user_text, companies):
+    if not companies:
+        return []
     documents = [user_text] + [c.get("summary", "") for c in companies]
     tfidf = TfidfVectorizer().fit_transform(documents)
     cosine_sim = cosine_similarity(tfidf[0:1], tfidf[1:]).flatten()
@@ -85,11 +87,6 @@ def generate_reason(user_text, companies_with_scores):
 
 기업명: 설명 (자기소개서 내용 일부를 언급하며)
 유사도 점수: (예: 0.85)
-
-예시:
-1. 삼성전자
-- 귀하께서 문제 해결을 위해 파이썬 코드를 직접 분석하고 개선한 경험은 삼성전자 R&D 직무와 매우 밀접한 관련이 있습니다. 특히 자율주행 차량 프로젝트에서의 분석력과 끈기는 큰 장점입니다.
-- 유사도 점수: 0.85
 """
     try:
         response = openai.chat.completions.create(
@@ -132,6 +129,10 @@ def chat():
             keywords = extract_keywords(state["user_text"])
             filtered = filter_companies(keywords, interest, region, salary)
             matched_with_scores = tfidf_similarity(state["user_text"], filtered)
+
+            if not matched_with_scores:
+                return jsonify({"reply": "조건에 맞는 기업을 찾지 못했습니다. 관심 분야나 지역을 조금 더 넓게 설정해보시겠어요?"})
+
             explanation = generate_reason(state["user_text"], matched_with_scores)
 
             user_states.pop(user_id, None)
