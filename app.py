@@ -16,7 +16,7 @@ openai.api_key = os.getenv("OPENAI_API_KEY") or "your-api-key"
 
 user_states = {}
 
-with open("jinju_companies.json", "r", encoding="utf-8") as f:
+with open("employment_info_all_converted.json", "r", encoding="utf-8") as f:
     company_data = json.load(f)
 
 def extract_text_from_pdf(pdf_file):
