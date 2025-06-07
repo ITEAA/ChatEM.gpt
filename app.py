@@ -52,7 +52,8 @@ def tfidf_similarity(user_text, companies):
     documents = [user_text] + [c.get("summary", "") for c in companies]
     tfidf = TfidfVectorizer().fit_transform(documents)
     cosine_sim = cosine_similarity(tfidf[0:1], tfidf[1:]).flatten()
-    scored = sorted(zip(cosine_sim, companies), key=lambda x: x[0], reverse=True)
+    scored = list(zip(cosine_sim, companies))
+    scored.sort(key=lambda x: x[0], reverse=True)
 
     adjusted_scores = []
     for score, company in scored:
@@ -141,7 +142,6 @@ def chat():
             keywords = extract_keywords(state["user_text"])
             filtered = filter_companies(keywords, state.get("interest"), state.get("region"), state.get("salary"))
             if not filtered:
-                print("⚠️ 조건 일치 기업 없음 → 전체 기업 중 유사도 기반 추천")
                 filtered = company_data
             matched = tfidf_similarity(state["user_text"], filtered)
             state["all_matches"] = matched
