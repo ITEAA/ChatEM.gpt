@@ -1,73 +1,110 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import fitz  # PyMuPDF
+import pandas as pd
+import requests
+import random
+import xml.etree.ElementTree as ET
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import joblib
-import os
+import openai
 
 app = Flask(__name__)
 CORS(app)
 
-# 더미 기업 데이터 (실제로는 DB 또는 API로부터 불러올 것)
-dummy_companies = [
-    {"name": "에이아이로직스", "description": "AI 기반 물류 최적화 솔루션 개발", "location": "성남", "salary": "3000"},
-    {"name": "그로스랩", "description": "데이터 기반 마케팅 자동화 플랫폼", "location": "수원", "salary": "3200"},
-    {"name": "메타인텔리전스", "description": "생성형 AI 기술 연구 및 서비스 제공", "location": "용인", "salary": "3500"},
-]
+# 🔑 API 키 및 URL
+GG_API_KEY = "8af0f404ca144249be0cfab9728b619b"
+GG_API_URL = "https://openapi.gg.go.kr/EmplmntInfoStus"
 
-@app.route("/")
-def home():
-    return "✅ Flask 서버 로컬 실행 중입니다."
+# 🧠 GPT 설정
+openai.api_key = "your-openai-key"
 
-@app.route("/api/test")
-def test():
-    return jsonify({"message": "서버 연결 성공", "status": "ok"})
+# ✅ 경기도 채용공고 불러오기
+def fetch_employment_info(index=1, size=100):
+    params = {"KEY": GG_API_KEY, "Type": "xml", "pIndex": index, "pSize": size}
+    response = requests.get(GG_API_URL, params=params)
+    root = ET.fromstring(response.content)
+    rows = root.findall(".//row")
+    
+    data = []
+    for row in rows:
+        row_data = [row.find(col).text if row.find(col) is not None else "" for col in [
+            "REGIST_DE", "SIGUN_NM", "COMPNY_NM", "EMPLMNT_TITLE", "WAGE_FORM", "SALARY_INFO", "WORK_REGION_LOC",
+            "WORK_FORM", "MIN_ACDMCR", "CAREER_INFO", "CLOS_DE_INFO", "EMPLMNT_INFO_URL"
+        ]]
+        data.append(row_data)
 
-@app.route("/upload", methods=["POST"])
-def upload_pdf():
-    if "file" not in request.files:
-        return jsonify({"error": "파일이 없습니다."}), 400
+    columns = ["등록일자", "시군명", "회사명", "채용공고명", "임금형태", "급여", "근무지역", "근무형태", "최소학력", "경력", "마감일자", "채용정보URL"]
+    return pd.DataFrame(data, columns=columns)
 
-    file = request.files["file"]
-    if not file.filename.endswith(".pdf"):
-        return jsonify({"error": "PDF 파일만 지원됩니다."}), 400
+# 📌 GPT 키워드 추출 함수
+def extract_keywords_gpt(text):
+    prompt = f"다음 자기소개서에서 핵심 키워드 5개를 뽑아줘:
+{text}"
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.5
+    )
+    return response['choices'][0]['message']['content'].strip().split('\n')
 
-    doc = fitz.open(stream=file.read(), filetype="pdf")
-    text = ""
-    for page in doc:
-        text += page.get_text()
+# 🎯 유사도 기반 추천 함수
+def recommend_jobs(df, keywords, filters):
+    # 필터링
+    if filters.get("region"):
+        df = df[df["근무지역"].str.contains(filters["region"])]
+    if filters.get("career"):
+        df = df[df["경력"].str.contains(filters["career"])]
 
-    return jsonify({"text": text.strip()})
+    # TF-IDF
+    corpus = df["채용공고명"].fillna("").tolist()
+    vectorizer = TfidfVectorizer()
+    tfidf_matrix = vectorizer.fit_transform(corpus + [" ".join(keywords)])
+    
+    cosine_sim = cosine_similarity(tfidf_matrix[-1], tfidf_matrix[:-1])
+    df["유사도"] = cosine_sim[0]
+    top = df.sort_values(by="유사도", ascending=False).head(3)
 
-@app.route("/recommend", methods=["POST"])
-def recommend():
-    data = request.json
-    if not data or "text" not in data:
-        return jsonify({"error": "자기소개서 텍스트가 없습니다."}), 400
+    return top[["회사명", "채용공고명", "근무지역", "급여", "채용정보URL", "유사도"]]
 
-    user_text = data["text"]
+# 🌐 테스트용 라우트 (원래 /recommend와 충돌 피함)
+@app.route("/recommend-local", methods=["POST"])
+def recommend_local():
+    user_data = request.json
+    text = user_data.get("text", "")
+    filters = {
+        "region": user_data.get("region"),
+        "career": user_data.get("career")
+    }
 
-    # 기업 설명 + 사용자 자기소개서 텍스트 TF-IDF 유사도 계산
-    corpus = [user_text] + [c["description"] for c in dummy_companies]
-    tfidf = TfidfVectorizer().fit_transform(corpus)
-    similarities = cosine_similarity(tfidf[0:1], tfidf[1:]).flatten()
+    keywords = extract_keywords_gpt(text)
+    df_jobs = fetch_employment_info()
+    recommendations = recommend_jobs(df_jobs, keywords, filters)
 
-    top_indices = similarities.argsort()[::-1][:2]  # 유사도 상위 2개
+    # 자연어 설명 추가
     results = []
-    for idx in top_indices:
-        company = dummy_companies[idx]
-        score = round(float(similarities[idx]) * 100, 2)
+    for _, row in recommendations.iterrows():
+        desc = f"{row['회사명']}에서 {row['채용공고명']} 포지션을 모집 중이며, 위치는 {row['근무지역']}, 급여는 {row['급여']}입니다."
         results.append({
-            "company": company["name"],
-            "description": company["description"],
-            "location": company["location"],
-            "salary": company["salary"],
-            "similarity": score,
-            "reason": f"당신의 자기소개서와 '{company['name']}' 기업의 특성이 {score}% 유사합니다."
+            "company": row["회사명"],
+            "position": row["채용공고명"],
+            "location": row["근무지역"],
+            "salary": row["급여"],
+            "url": row["채용정보URL"],
+            "score": round(float(row["유사도"]), 2),
+            "description": desc
         })
 
-    return jsonify({"recommendations": results})
+    return jsonify(results)
+
+# ✅ 테스트용 /chat 라우트
+@app.route("/chat-local", methods=["POST"])
+def chat_local():
+    user_message = request.json.get("message", "")
+    if "진주" in user_message:
+        df_jobs = fetch_employment_info()
+        df_filtered = df_jobs[df_jobs["근무지역"].str.contains("진주")]
+        return jsonify(df_filtered.head(5).to_dict(orient="records"))
+    return jsonify({"message": "다시 한 번 이력서를 입력해 주세요."})
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=True)
