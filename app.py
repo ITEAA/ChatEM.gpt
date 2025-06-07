@@ -1,195 +1,92 @@
 import os
 import json
-import fitz  # PyMuPDF
-import openai
 import pickle
-from flask import Flask, request, jsonify, render_template
-from flask_cors import CORS
-from sklearn.metrics.pairwise import cosine_similarity
+import difflib
 import random
+import fitz  # PyMuPDF
+from flask import Flask, request, jsonify
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 app = Flask(__name__)
-CORS(app)
 
-openai.api_key = os.getenv("OPENAI_API_KEY") or "your-api-key"
-
-user_states = {}
-
-# 사전 계산된 데이터 로딩
-with open("ChatEM_vectorizer.pkl", "rb") as f:
-    vectorizer = pickle.load(f)
-with open("ChatEM_tfidf_matrix.pkl", "rb") as f:
-    tfidf_matrix = pickle.load(f)
+# Load company data only once (lightweight)
 with open("ChatEM_companies_top1000.json", "r", encoding="utf-8") as f:
-    company_data = json.load(f)
+    companies = json.load(f)
 
-def extract_text_from_pdf(pdf_file):
-    doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
-    text = "\n".join(page.get_text() for page in doc)
-    return text.strip()
+def load_vectorizer_and_matrix():
+    with open("ChatEM_vectorizer.pkl", "rb") as f:
+        vectorizer = pickle.load(f)
+    with open("ChatEM_tfidf_matrix.pkl", "rb") as f:
+        tfidf_matrix = pickle.load(f)
+    return vectorizer, tfidf_matrix
 
-def extract_keywords(text):
-    prompt = f"""
-    다음 자기소개서 또는 이력서에서 핵심 키워드를 추출해줘.
-    - 5~10개 정도 뽑아줘.
-    - 키워드는 콤마(,)로 구분해서 출력해줘.
+def extract_text_from_pdf(file):
+    text = ""
+    with fitz.open(stream=file.read(), filetype="pdf") as doc:
+        for page in doc:
+            text += page.get_text()
+    return text
 
-    내용:
-    {text}
-    """
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.4
-        )
-        result = response.choices[0].message.content
-        keywords = [kw.strip() for kw in result.split(",") if kw.strip()]
-        return keywords
-    except Exception as e:
-        print(f"❌ GPT 호출 에러: {e}")
-        return []
+def extract_keywords_from_text(text):
+    # 단순 키워드 추출 (TF-IDF 기반)
+    tfidf = TfidfVectorizer(stop_words='english', max_features=10)
+    tfidf_matrix = tfidf.fit_transform([text])
+    return tfidf.get_feature_names_out()
 
-def tfidf_similarity(user_text):
+def recommend_companies(user_text, user_field, user_location, user_salary):
+    vectorizer, tfidf_matrix = load_vectorizer_and_matrix()
     user_vec = vectorizer.transform([user_text])
-    cosine_sim = cosine_similarity(user_vec, tfidf_matrix).flatten()
-    scored = list(zip(cosine_sim, company_data))
-    scored.sort(key=lambda x: x[0], reverse=True)
-    adjusted_scores = []
-    for score, company in scored:
-        if score < 0.6:
-            fake_score = round(random.uniform(0.60, 0.70), 2)
-        elif score > 0.9:
-            fake_score = round(random.uniform(0.90, 0.95), 2)
-        else:
-            fake_score = round(score, 2)
-        adjusted_scores.append((company, fake_score))
-    return adjusted_scores
+    cosine_similarities = cosine_similarity(user_vec, tfidf_matrix).flatten()
 
-def filter_companies(companies, interest=None, region=None):
-    filtered = []
-    for company in companies:
-        industry = company.get("industry", "")
-        location = company.get("region", "")
-        if interest and interest not in industry:
-            continue
-        if region and region not in location:
-            continue
-        filtered.append(company)
-    return filtered
+    company_scores = []
+    for idx, score in enumerate(cosine_similarities):
+        company = companies[idx]
+        if (user_field.lower() in company['분야'].lower() and
+            user_location in company['지역'] and
+            int(company['연봉']) <= int(user_salary)):
+            company_scores.append((company, score))
 
-def generate_reason(user_text, companies_with_scores):
-    companies_info = []
-    for company, score in companies_with_scores:
-        companies_info.append({
-            "name": company.get("name"),
-            "summary": company.get("summary"),
-            "score": score
+    # 점수 기준 정렬 및 상위 2~3개 추천
+    company_scores.sort(key=lambda x: x[1], reverse=True)
+    top_matches = company_scores[:3] if company_scores else []
+
+    # 추천 결과 구성
+    results = []
+    for company, score in top_matches:
+        results.append({
+            "회사명": company['회사명'],
+            "지역": company['지역'],
+            "분야": company['분야'],
+            "연봉": company['연봉'],
+            "유사도점수": f"{score*100:.2f}%",
+            "설명": f"'{company['회사명']}'은(는) 사용자의 관심 분야({user_field}) 및 지역({user_location})과 잘 부합하며, 연봉 조건도 충족합니다."
         })
-    prompt = f"""
-당신은 채용 컨설턴트입니다.
-아래 자기소개서와 기업 정보를 참고하여, 각 기업이 사용자에게 왜 적합한지 친절하고 전문적인 말투로 설명해 주세요.
+    return results
 
-[자기소개서 내용]
-{user_text}
-
-[기업 목록 및 유사도 점수]
-{json.dumps(companies_info, ensure_ascii=False)}
-
-출력 형식:
-기업명: 설명
-유사도 점수: 0.XX
-"""
+@app.route("/recommend", methods=["POST"])
+def recommend():
     try:
-        response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        print(f"❌ GPT 추천 설명 생성 에러: {e}")
-        return "추천 이유를 생성하는 중 오류가 발생했습니다."
+        data = request.form
+        user_field = data.get("field", "")
+        user_location = data.get("location", "")
+        user_salary = data.get("salary", "0")
 
-@app.route("/")
-def index():
-    return render_template("index.html")
-
-@app.route("/chat", methods=["POST"])
-def chat():
-    user_id = request.remote_addr
-    message = request.form.get("message", "").strip()
-    file = request.files.get("file")
-    state = user_states.get(user_id, {})
-
-    try:
-        if file:
+        # 파일 또는 텍스트 입력 처리
+        if 'file' in request.files:
+            file = request.files['file']
             user_text = extract_text_from_pdf(file)
-            state["user_text"] = user_text
-            user_states[user_id] = state
+        else:
+            user_text = data.get("text", "")
 
-        if message and "," in message and "만원" in message:
-            parts = [p.strip() for p in message.replace("만원", "").split(",")]
-            state["interest"] = parts[0] if len(parts) > 0 else ""
-            state["region"] = parts[1] if len(parts) > 1 else ""
-            state["salary"] = parts[2] if len(parts) > 2 else ""
-            user_states[user_id] = state
+        if not user_text.strip():
+            return jsonify({"error": "이력서나 자기소개서를 입력하거나 업로드하세요."}), 400
 
-        if message and "user_text" not in state:
-            state["user_text"] = message
-            user_states[user_id] = state
-
-        if "user_text" in state and "interest" in state and "step" not in state:
-            matched = tfidf_similarity(state["user_text"])
-            filtered = filter_companies([c for c, _ in matched], state.get("interest"), state.get("region"))
-            matched_filtered = [(c, s) for c, s in matched if c in filtered]
-            state["all_matches"] = matched_filtered
-            state["shown_indices"] = [0, 1, 2]
-            selected = [matched_filtered[i] for i in state["shown_indices"] if i < len(matched_filtered)]
-            explanation = generate_reason(state["user_text"], selected)
-            state["step"] = 3
-            state["last_result"] = explanation
-            user_states[user_id] = state
-            return jsonify({
-                "reply": explanation + "\n\n더 궁금한 점이나 고려하고 싶은 조건이 있으면 입력해 주세요. 추가로 반영해 드릴게요."
-            })
-
-        if state.get("step") == 3 and message:
-            if "다른" in message and "기업" in message:
-                matched = state.get("all_matches", [])
-                next_index = max(state["shown_indices"]) + 1
-                while next_index < len(matched):
-                    if next_index not in state["shown_indices"]:
-                        state["shown_indices"].append(next_index)
-                        selected = [matched[next_index]]
-                        explanation = generate_reason(state["user_text"], selected)
-                        user_states[user_id] = state
-                        return jsonify({"reply": explanation + "\n\n더 궁금한 점이나 고려하고 싶은 조건이 있으면 입력해 주세요."})
-                    next_index += 1
-                return jsonify({"reply": "더 이상 추천할 기업이 없습니다."})
-            else:
-                combined_text = state["user_text"] + "\n\n[사용자 추가 입력]: " + message
-                matched = tfidf_similarity(combined_text)
-                filtered = filter_companies([c for c, _ in matched], state.get("interest"), state.get("region"))
-                matched_filtered = [(c, s) for c, s in matched if c in filtered]
-                selected = matched_filtered[:3]
-                explanation = generate_reason(combined_text, selected)
-                user_states.pop(user_id, None)
-                return jsonify({"reply": explanation})
-
-        missing = []
-        if "user_text" not in state:
-            missing.append("자기소개서 또는 이력서")
-        if "interest" not in state:
-            missing.append("관심 분야, 희망 근무지, 희망 연봉")
-        if missing:
-            return jsonify({"reply": f"먼저 {', '.join(missing)}를 입력해 주세요."})
-
-        return jsonify({"reply": "입력을 인식하지 못했습니다. 다시 시도해 주세요."})
+        recommendations = recommend_companies(user_text, user_field, user_location, user_salary)
+        return jsonify({"추천결과": recommendations})
 
     except Exception as e:
-        print(f"❌ 서버 에러: {e}")
-        return jsonify({"reply": f"❌ 오류 발생: {str(e)}"}), 500
+        return jsonify({"error": str(e)})
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=8080)
+    app.run(host="0.0.0.0", port=8080, debug=True)
