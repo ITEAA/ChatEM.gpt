@@ -69,16 +69,18 @@ def filter_companies(keywords, interest=None, region=None, salary=None):
 def generate_reason(user_text, companies_with_scores):
     companies_info = []
     for company, score in companies_with_scores:
-        companies_info.append({"name": company.get("name"), "summary": company.get("summary"), "score": score})
+        companies_info.append({
+            "name": company.get("name"),
+            "summary": company.get("summary"),
+            "score": score
+        })
 
     prompt = f"""
 당신은 채용 컨설턴트 역할을 수행하고 있습니다.
 아래 자기소개서와 기업 정보를 참고하여, 각 기업이 사용자에게 왜 적합한지 친절하고 전문적인 말투로 설명해 주세요.
 
 [자기소개서 내용]
-"""
 {user_text}
-"""
 
 [기업 목록 및 유사도 점수]
 {json.dumps(companies_info, ensure_ascii=False)}
@@ -87,7 +89,8 @@ def generate_reason(user_text, companies_with_scores):
 
 기업명: 설명 (자기소개서 내용 일부를 언급하며)
 유사도 점수: (예: 0.85)
-"""
+    """
+
     try:
         response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
