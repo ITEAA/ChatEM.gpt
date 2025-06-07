@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 import pandas as pd
 import requests
+import random
 import xml.etree.ElementTree as ET
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
