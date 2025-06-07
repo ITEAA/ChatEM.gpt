@@ -2,99 +2,70 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>ChatEM 기업 매칭 챗봇</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ChatEM</title>
   <style>
     body {
-      font-family: 'Segoe UI', sans-serif;
-      background-color: #f4f4f4;
+      font-family: Arial, sans-serif;
+      background: #f5f5f5;
       margin: 0;
-      padding: 30px 0;
-      display: flex;
-      justify-content: center;
+      padding: 0;
     }
-
-    #chatContainer {
-      width: 100%;
-      max-width: 600px;
-      background: white;
-      border-radius: 10px;
+    #chatbox {
+      max-width: 700px;
+      margin: 30px auto;
+      background: #fff;
       padding: 20px;
-      box-shadow: 0 0 10px rgba(0,0,0,0.1);
-      display: flex;
-      flex-direction: column;
-    }
-
-    #chatBox {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      padding: 10px;
-      background: #fafafa;
       border-radius: 8px;
-      min-height: 300px;
-      max-height: 500px;
-      overflow-y: auto;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
-
     .message {
-      padding: 10px 15px;
-      border-radius: 15px;
-      max-width: 80%;
-      word-wrap: break-word;
-      white-space: pre-wrap;
+      margin-bottom: 10px;
     }
-
     .user {
-      background: #d1e7dd;
-      align-self: flex-end;
+      text-align: right;
+      color: #333;
     }
-
-    .gpt {
-      background: #e2e3e5;
-      align-self: flex-start;
+    .bot {
+      text-align: left;
+      color: #444;
+      background: #f0f0f0;
+      padding: 10px;
+      border-radius: 8px;
+      display: inline-block;
+      max-width: 90%;
     }
-
     #inputArea {
       display: flex;
       flex-direction: column;
-      margin-top: 15px;
-      gap: 10px;
+      margin-top: 20px;
     }
-
-    #userInput, #interestInput, #regionInput, #salaryInput {
+    #userInput {
+      width: 100%;
       padding: 10px;
       font-size: 16px;
-      border-radius: 5px;
-      border: 1px solid #ccc;
+      resize: vertical;
     }
-
-    #fileInput {
-      border: none;
-    }
-
     #sendBtn {
+      margin-top: 10px;
       padding: 10px;
-      font-size: 16px;
-      border: none;
-      background-color: #4CAF50;
+      background: #28a745;
       color: white;
-      border-radius: 5px;
+      border: none;
+      font-size: 16px;
       cursor: pointer;
-      width: 100px;
-      align-self: flex-end;
+      border-radius: 4px;
     }
-
     #sendBtn:hover {
-      background-color: #45a049;
+      background: #218838;
     }
   </style>
 </head>
 <body>
-  <div id="chatContainer">
-    <h2>ChatEM</h2>
-    <div id="chatBox">
-      <div class="message gpt">안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊<br>자기소개서나 이력서를 첨부해주시면 더 정확한 추천이 가능해요!</div>
-    </div>
+  <div id="chatbox">
+    <div class="bot message">안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊<br>자기소개서나 이력서를 첨부해주시면 더 정확한 추천이 가능해요!</div>
+
+    <div id="chatLog"></div>
 
     <div id="inputArea">
       <textarea id="userInput" placeholder="자기소개서 또는 메시지를 입력하세요..." rows="3"></textarea>
@@ -104,76 +75,55 @@
   </div>
 
   <script>
-    const input = document.getElementById("userInput");
-    const chatBox = document.getElementById("chatBox");
+    const chatLog = document.getElementById("chatLog");
+    const userInput = document.getElementById("userInput");
+    const sendBtn = document.getElementById("sendBtn");
     const fileInput = document.getElementById("fileInput");
-    const interestInput = document.getElementById("interestInput");
-    const regionInput = document.getElementById("regionInput");
-    const salaryInput = document.getElementById("salaryInput");
 
-    input.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        sendMessage();
+    userInput.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        sendBtn.click();
       }
     });
 
+    function appendMessage(sender, text) {
+      const div = document.createElement("div");
+      div.className = sender + " message";
+      div.innerText = text;
+      chatLog.appendChild(div);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
     async function sendMessage() {
-      const message = input.value.trim();
+      const message = userInput.value.trim();
       const file = fileInput.files[0];
-      const interest = interestInput.value.trim();
-      const region = regionInput.value.trim();
-      const salary = salaryInput.value.trim();
 
       if (!message && !file) return;
 
-      const userDiv = document.createElement("div");
-      userDiv.className = "message user";
-      userDiv.innerText = message || [이력서/자기소개서 업로드됨: ${file.name}];
-      chatBox.appendChild(userDiv);
-
-      const loadingDiv = document.createElement("div");
-      loadingDiv.className = "message gpt";
-      loadingDiv.innerText = "분석 중입니다. 잠시만 기다려주세요...";
-      chatBox.appendChild(loadingDiv);
+      if (message) {
+        appendMessage("user", message);
+        userInput.value = "";
+      }
 
       const formData = new FormData();
       formData.append("message", message);
-      formData.append("interest", interest);
-      formData.append("region", region);
-      formData.append("salary", salary);
-      if (file) formData.append("file", file);
+      if (file) {
+        formData.append("file", file);
+        fileInput.value = "";
+      }
 
       try {
         const response = await fetch("/chat", {
           method: "POST",
-          body: formData,
+          body: formData
         });
-
-        const contentType = response.headers.get("content-type") || "";
-
-        if (!response.ok) {
-          throw new Error(서버 응답 오류: ${response.status});
-        }
-
-        if (contentType.includes("application/json")) {
-          const data = await response.json();
-          loadingDiv.innerText = data.reply;
-        } else {
-          const text = await response.text();
-          loadingDiv.innerText = "❌ 예상치 못한 응답 형식:\n" + text;
-        }
+        const data = await response.json();
+        appendMessage("bot", data.reply);
       } catch (err) {
-        loadingDiv.innerText = "❌ 오류 발생: " + err.message;
+        appendMessage("bot", "⚠️ 서버 응답 오류가 발생했습니다.");
+        console.error(err);
       }
-
-      input.value = "";
-      interestInput.value = "";
-      regionInput.value = "";
-      salaryInput.value = "";
-      fileInput.value = null;
-      input.focus();
-      chatBox.scrollTop = chatBox.scrollHeight;
     }
   </script>
 </body>
