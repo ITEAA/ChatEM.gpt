@@ -52,7 +52,7 @@ def tfidf_similarity(user_text, companies):
     tfidf = TfidfVectorizer().fit_transform(documents)
     cosine_sim = cosine_similarity(tfidf[0:1], tfidf[1:]).flatten()
     scored = sorted(zip(cosine_sim, companies), key=lambda x: x[0], reverse=True)
-    return [(c, round(score, 2)) for score, c in scored if score > 0.1][:3]
+    return [(c, round(score, 2)) for score, c in scored if score > 0.1][:3] or [(scored[0][1], round(scored[0][0], 2))] if scored else []
 
 def filter_companies(keywords, interest=None, region=None, salary=None):
     filtered = []
@@ -76,9 +76,7 @@ def generate_reason(user_text, companies_with_scores):
 아래 자기소개서와 기업 정보를 참고하여, 각 기업이 사용자에게 왜 적합한지 친절하고 전문적인 말투로 설명해 주세요.
 
 [자기소개서 내용]
-"""
 {user_text}
-"""
 
 [기업 목록 및 유사도 점수]
 {json.dumps(companies_info, ensure_ascii=False)}
@@ -129,7 +127,6 @@ def chat():
             keywords = extract_keywords(state["user_text"])
             filtered = filter_companies(keywords, interest, region, salary)
 
-            # ✅ 조건 일치 기업이 없으면 전체 대상으로 유사도 분석 진행
             if not filtered:
                 print("⚠️ 조건 일치 기업 없음 → 전체 기업 중 유사도 기반 추천 진행")
                 filtered = company_data
