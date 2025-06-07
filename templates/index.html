@@ -2,132 +2,112 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>ChatEM</title>
   <style>
     body {
-      font-family: sans-serif;
-      background-color: #f6f6f6;
-    }
-
-    #chatBox {
-      width: 90%;
-      max-width: 800px;
-      margin: 40px auto;
-      background-color: white;
+      font-family: Arial, sans-serif;
       padding: 20px;
-      border-radius: 10px;
     }
-
-    .message {
+    h1 {
+      font-size: 24px;
+    }
+    .chat-box {
+      border: 1px solid #ddd;
+      border-radius: 12px;
       padding: 10px;
-      margin: 10px 0;
-      border-radius: 10px;
+      max-height: 400px;
+      overflow-y: auto;
+      margin-bottom: 10px;
     }
-
+    .message {
+      margin-bottom: 8px;
+    }
     .user {
       text-align: right;
-      background-color: #e0f7fa;
+      color: green;
     }
-
     .bot {
       text-align: left;
-      background-color: #eeeeee;
+      color: black;
+      background-color: #f2f2f2;
+      padding: 8px;
+      border-radius: 8px;
+      display: inline-block;
     }
-
-    #inputArea {
-      margin-top: 20px;
-    }
-
-    #userInput {
+    textarea {
       width: 100%;
       height: 80px;
-      padding: 10px;
-      border-radius: 10px;
-      border: 1px solid #ccc;
-      resize: none;
+      margin-bottom: 5px;
     }
-
-    #sendBtn {
-      background-color: #2ecc71;
+    button {
+      background-color: #28a745;
       color: white;
-      padding: 12px 20px;
       border: none;
-      border-radius: 10px;
-      margin-top: 10px;
-      width: 100%;
-      font-size: 16px;
+      padding: 10px 16px;
+      border-radius: 5px;
       cursor: pointer;
     }
-
-    #fileInput {
-      margin-top: 8px;
+    button:hover {
+      background-color: #218838;
     }
   </style>
 </head>
 <body>
-  <div id="chatBox">
-    <div class="message bot">
-      <p>안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊<br>자기소개서나 이력서를 첨부해주시면 더 정확한 추천이 가능해요!</p>
-    </div>
-
-    <div id="chatLog"></div>
-
-    <div id="inputArea">
-      <textarea id="userInput" placeholder="자기소개서 또는 메시지를 입력하세요..." rows="3"></textarea>
-      <input type="file" id="fileInput" />
-      <button id="sendBtn" onclick="sendMessage()">보내기</button>
-    </div>
+  <h1>ChatEM</h1>
+  <div class="chat-box" id="chatBox">
+    <div class="message bot">안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊<br>자기소개서나 이력서를 첨부해주시면 더 정확한 추천이 가능해요!</div>
+  </div>
+  <div id="inputArea">
+    <textarea id="userInput" placeholder="자기소개서 또는 메시지를 입력하세요..." rows="3"></textarea>
+    <input type="file" id="fileInput" />
+    <button id="sendBtn" onclick="sendMessage()">보내기</button>
   </div>
 
   <script>
-    const chatLog = document.getElementById("chatLog");
+    const chatBox = document.getElementById("chatBox");
     const userInput = document.getElementById("userInput");
     const fileInput = document.getElementById("fileInput");
 
-    userInput.addEventListener("keydown", function(event) {
-      if (event.key === "Enter" && !event.shiftKey) {
-        event.preventDefault();
-        sendMessage();
-      }
-    });
-
-    function appendMessage(text, sender) {
-      const message = document.createElement("div");
-      message.className = `message ${sender}`;
-      message.innerHTML = `<p>${text.replace(/\n/g, "<br>")}</p>`;
-      chatLog.appendChild(message);
-      chatLog.scrollTop = chatLog.scrollHeight;
+    function addMessage(text, sender = "bot") {
+      const msg = document.createElement("div");
+      msg.className = `message ${sender}`;
+      msg.innerHTML = text.replace(/\n/g, "<br>");
+      chatBox.appendChild(msg);
+      chatBox.scrollTop = chatBox.scrollHeight;
     }
 
-    function sendMessage() {
+    async function sendMessage() {
       const message = userInput.value.trim();
-      if (!message && !fileInput.files.length) return;
+      const file = fileInput.files[0];
 
-      if (message) {
-        appendMessage(message, "user");
-      }
+      if (!message && !file) return;
+
+      if (message) addMessage(message, "user");
+      userInput.value = "";
 
       const formData = new FormData();
       formData.append("message", message);
-      if (fileInput.files.length > 0) {
-        formData.append("file", fileInput.files[0]);
-      }
+      if (file) formData.append("file", file);
 
-      fetch("/chat", {
-        method: "POST",
-        body: formData
-      })
-        .then(response => response.json())
-        .then(data => {
-          appendMessage(data.reply, "bot");
-          userInput.value = "";
-          fileInput.value = "";
-        })
-        .catch(error => {
-          appendMessage("⚠️ 서버 응답 오류가 발생했습니다.", "bot");
-          console.error("❌ 오류:", error);
+      try {
+        const res = await fetch("/chat", {
+          method: "POST",
+          body: formData,
         });
+        const data = await res.json();
+        addMessage(data.reply, "bot");
+      } catch (err) {
+        addMessage("⚠️ 서버 응답 오류가 발생했습니다.", "bot");
+      }
     }
+
+    userInput.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
   </script>
 </body>
 </html>
