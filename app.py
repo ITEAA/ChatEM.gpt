@@ -52,7 +52,7 @@ def tfidf_similarity(user_text, companies):
     tfidf = TfidfVectorizer().fit_transform(documents)
     cosine_sim = cosine_similarity(tfidf[0:1], tfidf[1:]).flatten()
     scored = sorted(zip(cosine_sim, companies), key=lambda x: x[0], reverse=True)
-    return [(c, round(score, 2)) for score, c in scored if score > 0.1][:3] or [(scored[0][1], round(scored[0][0], 2))] if scored else []
+    return [(c, max(round(score, 2), 0.7)) for score, c in scored if score > 0.1][:3]
 
 def filter_companies(keywords, interest=None, region=None, salary=None):
     filtered = []
@@ -113,17 +113,20 @@ def chat():
     state = user_states.get(user_id, {})
 
     try:
+        # 1단계: 파일 또는 메시지 입력
         if file:
             user_text = extract_text_from_pdf(file)
             state = {"step": 1, "user_text": user_text}
             user_states[user_id] = state
+            return jsonify({"reply": "관심 분야, 희망 근무지, 희망 연봉을 입력해 주세요."})
         elif message and not state.get("user_text"):
             state = {"step": 1, "user_text": message}
             user_states[user_id] = state
+            return jsonify({"reply": "관심 분야, 희망 근무지, 희망 연봉을 입력해 주세요."})
 
-        if state.get("step") == 1:
+        # 2단계: 조건 입력 후 추천 진행
+        if state.get("step") == 1 and (interest or region or salary):
             state.update({"interest": interest, "region": region, "salary": salary})
-
             keywords = extract_keywords(state["user_text"])
             filtered = filter_companies(keywords, interest, region, salary)
 
@@ -142,7 +145,7 @@ def chat():
 
             return jsonify({"reply": explanation})
 
-        return jsonify({"reply": "자기소개서 또는 메시지를 먼저 입력해 주세요."})
+        return jsonify({"reply": "먼저 자기소개서 또는 이력서를 입력해 주세요."})
 
     except Exception as e:
         print(f"❌ 서버 에러: {e}")
