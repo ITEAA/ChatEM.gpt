@@ -69,18 +69,16 @@ def filter_companies(keywords, interest=None, region=None, salary=None):
 def generate_reason(user_text, companies_with_scores):
     companies_info = []
     for company, score in companies_with_scores:
-        companies_info.append({
-            "name": company.get("name"),
-            "summary": company.get("summary"),
-            "score": score
-        })
+        companies_info.append({"name": company.get("name"), "summary": company.get("summary"), "score": score})
 
     prompt = f"""
 당신은 채용 컨설턴트 역할을 수행하고 있습니다.
 아래 자기소개서와 기업 정보를 참고하여, 각 기업이 사용자에게 왜 적합한지 친절하고 전문적인 말투로 설명해 주세요.
 
 [자기소개서 내용]
+"""
 {user_text}
+"""
 
 [기업 목록 및 유사도 점수]
 {json.dumps(companies_info, ensure_ascii=False)}
@@ -89,8 +87,7 @@ def generate_reason(user_text, companies_with_scores):
 
 기업명: 설명 (자기소개서 내용 일부를 언급하며)
 유사도 점수: (예: 0.85)
-    """
-
+"""
     try:
         response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
@@ -131,10 +128,16 @@ def chat():
 
             keywords = extract_keywords(state["user_text"])
             filtered = filter_companies(keywords, interest, region, salary)
+
+            # ✅ 조건 일치 기업이 없으면 전체 대상으로 유사도 분석 진행
+            if not filtered:
+                print("⚠️ 조건 일치 기업 없음 → 전체 기업 중 유사도 기반 추천 진행")
+                filtered = company_data
+
             matched_with_scores = tfidf_similarity(state["user_text"], filtered)
 
             if not matched_with_scores:
-                return jsonify({"reply": "조건에 맞는 기업을 찾지 못했습니다. 관심 분야나 지역을 조금 더 넓게 설정해보시겠어요?"})
+                return jsonify({"reply": "기업 추천에 실패했습니다. 다시 시도해 주세요."})
 
             explanation = generate_reason(state["user_text"], matched_with_scores)
 
