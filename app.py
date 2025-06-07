@@ -138,29 +138,27 @@ def chat():
             state["user_text"] = message
             user_states[user_id] = state
 
-        if "user_text" in state and "interest" in state:
-            if "all_matches" not in state:
-                keywords = extract_keywords(state["user_text"])
-                filtered = filter_companies(keywords, state.get("interest"), state.get("region"), state.get("salary"))
-                if not filtered:
-                    filtered = company_data
-                matched = tfidf_similarity(state["user_text"], filtered)
-                state["all_matches"] = matched
-                state["shown_indices"] = [0, 1, 2]
-                selected = [matched[i] for i in state["shown_indices"] if i < len(matched)]
-                explanation = generate_reason(state["user_text"], selected)
-                state["step"] = 3
-                state["last_result"] = explanation
-                user_states[user_id] = state
-                return jsonify({
-                    "reply": explanation + "\n\n더 궁금한 점이나 고려하고 싶은 조건이 있으면 입력해 주세요. 추가로 반영해 드릴게요."
-                })
+        if "user_text" in state and "interest" in state and "step" not in state:
+            keywords = extract_keywords(state["user_text"])
+            filtered = filter_companies(keywords, state.get("interest"), state.get("region"), state.get("salary"))
+            if not filtered:
+                filtered = company_data
+            matched = tfidf_similarity(state["user_text"], filtered)
+            state["all_matches"] = matched
+            state["shown_indices"] = [0, 1, 2]
+            selected = [matched[i] for i in state["shown_indices"] if i < len(matched)]
+            explanation = generate_reason(state["user_text"], selected)
+            state["step"] = 3
+            state["last_result"] = explanation
+            user_states[user_id] = state
+            return jsonify({
+                "reply": explanation + "\n\n더 궁금한 점이나 고려하고 싶은 조건이 있으면 입력해 주세요. 추가로 반영해 드릴게요."
+            })
 
         if state.get("step") == 3 and message:
             if "다른" in message and "기업" in message:
                 matched = state.get("all_matches", [])
-                max_shown_index = max(state["shown_indices"])
-                next_index = max_shown_index + 1
+                next_index = max(state["shown_indices"]) + 1
                 if next_index < len(matched):
                     state["shown_indices"].append(next_index)
                     selected = [matched[next_index]]
