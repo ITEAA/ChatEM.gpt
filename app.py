@@ -55,7 +55,7 @@ def tfidf_similarity(user_text, companies):
     scored = sorted(zip(cosine_sim, companies), key=lambda x: x[0], reverse=True)
 
     adjusted_scores = []
-    for score, company in scored[:3]:
+    for score, company in scored:
         if score < 0.6:
             fake_score = round(random.uniform(0.60, 0.80), 2)
             adjusted_scores.append((company, fake_score))
@@ -121,13 +121,11 @@ def chat():
     state = user_states.get(user_id, {})
 
     try:
-        # 파일 업로드로 자기소개서 추출
         if file:
             user_text = extract_text_from_pdf(file)
             state["user_text"] = user_text
             user_states[user_id] = state
 
-        # 관심분야, 지역, 연봉 입력인지 확인 (예: AI, 서울, 3000만원)
         if message and "," in message and "만원" in message:
             parts = [p.strip() for p in message.replace("만원", "").split(",")]
             state["interest"] = parts[0] if len(parts) > 0 else ""
@@ -135,12 +133,10 @@ def chat():
             state["salary"] = parts[2] if len(parts) > 2 else ""
             user_states[user_id] = state
 
-        # 텍스트 입력이 자기소개서로 판단되는 경우
         if message and "user_text" not in state:
             state["user_text"] = message
             user_states[user_id] = state
 
-        # 조건이 모두 충족된 경우 추천 수행
         if "user_text" in state and "interest" in state:
             keywords = extract_keywords(state["user_text"])
             filtered = filter_companies(keywords, state.get("interest"), state.get("region"), state.get("salary"))
@@ -148,9 +144,10 @@ def chat():
                 print("⚠️ 조건 일치 기업 없음 → 전체 기업 중 유사도 기반 추천")
                 filtered = company_data
             matched = tfidf_similarity(state["user_text"], filtered)
-            if not matched:
-                return jsonify({"reply": "기업 추천에 실패했습니다. 다시 시도해 주세요."})
-            explanation = generate_reason(state["user_text"], matched)
+            state["all_matches"] = matched
+            state["shown_indices"] = [0, 1, 2]
+            selected = [matched[i] for i in state["shown_indices"] if i < len(matched)]
+            explanation = generate_reason(state["user_text"], selected)
             state["step"] = 3
             state["last_result"] = explanation
             user_states[user_id] = state
@@ -158,19 +155,30 @@ def chat():
                 "reply": explanation + "\n\n더 궁금한 점이나 고려하고 싶은 조건이 있으면 입력해 주세요. 추가로 반영해 드릴게요."
             })
 
-        # 추천 이후 추가 조건 반영
         if state.get("step") == 3 and message:
-            combined_text = state["user_text"] + "\n\n[사용자 추가 입력]: " + message
-            keywords = extract_keywords(combined_text)
-            filtered = filter_companies(keywords, state.get("interest"), state.get("region"), state.get("salary"))
-            if not filtered:
-                filtered = company_data
-            matched = tfidf_similarity(combined_text, filtered)
-            explanation = generate_reason(combined_text, matched)
-            user_states.pop(user_id, None)
-            return jsonify({"reply": explanation})
+            if "다른" in message and "기업" in message:
+                matched = state.get("all_matches", [])
+                next_index = max(state["shown_indices"]) + 1
+                if next_index < len(matched):
+                    state["shown_indices"].append(next_index)
+                    selected = [matched[next_index]]
+                    explanation = generate_reason(state["user_text"], selected)
+                    user_states[user_id] = state
+                    return jsonify({"reply": explanation + "\n\n더 궁금한 점이나 고려하고 싶은 조건이 있으면 입력해 주세요."})
+                else:
+                    return jsonify({"reply": "더 이상 추천할 기업이 없습니다."})
+            else:
+                combined_text = state["user_text"] + "\n\n[사용자 추가 입력]: " + message
+                keywords = extract_keywords(combined_text)
+                filtered = filter_companies(keywords, state.get("interest"), state.get("region"), state.get("salary"))
+                if not filtered:
+                    filtered = company_data
+                matched = tfidf_similarity(combined_text, filtered)
+                selected = matched[:3]
+                explanation = generate_reason(combined_text, selected)
+                user_states.pop(user_id, None)
+                return jsonify({"reply": explanation})
 
-        # 미입력 항목 안내
         missing = []
         if "user_text" not in state:
             missing.append("자기소개서 또는 이력서")
