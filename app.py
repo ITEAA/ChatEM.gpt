@@ -1,92 +1,107 @@
-import os
-import json
-import pickle
-import difflib
-import random
-import fitz  # PyMuPDF
 from flask import Flask, request, jsonify
-from sklearn.metrics.pairwise import cosine_similarity
+import pandas as pd
+import requests
+import xml.etree.ElementTree as ET
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import openai
 
 app = Flask(__name__)
 
-# Load company data only once (lightweight)
-with open("ChatEM_companies_top1000.json", "r", encoding="utf-8") as f:
-    companies = json.load(f)
+# 🔑 API 키 및 URL
+GG_API_KEY = "8af0f404ca144249be0cfab9728b619b"
+GG_API_URL = "https://openapi.gg.go.kr/EmplmntInfoStus"
 
-def load_vectorizer_and_matrix():
-    with open("ChatEM_vectorizer.pkl", "rb") as f:
-        vectorizer = pickle.load(f)
-    with open("ChatEM_tfidf_matrix.pkl", "rb") as f:
-        tfidf_matrix = pickle.load(f)
-    return vectorizer, tfidf_matrix
+# 🧠 GPT 설정
+openai.api_key = "your-openai-key"
 
-def extract_text_from_pdf(file):
-    text = ""
-    with fitz.open(stream=file.read(), filetype="pdf") as doc:
-        for page in doc:
-            text += page.get_text()
-    return text
+# ✅ 경기도 채용공고 불러오기
+def fetch_employment_info(index=1, size=100):
+    params = {"KEY": GG_API_KEY, "Type": "xml", "pIndex": index, "pSize": size}
+    response = requests.get(GG_API_URL, params=params)
+    root = ET.fromstring(response.content)
+    rows = root.findall(".//row")
+    
+    data = []
+    for row in rows:
+        row_data = [row.find(col).text if row.find(col) is not None else "" for col in [
+            "REGIST_DE", "SIGUN_NM", "COMPNY_NM", "EMPLMNT_TITLE", "WAGE_FORM", "SALARY_INFO", "WORK_REGION_LOC",
+            "WORK_FORM", "MIN_ACDMCR", "CAREER_INFO", "CLOS_DE_INFO", "EMPLMNT_INFO_URL"
+        ]]
+        data.append(row_data)
 
-def extract_keywords_from_text(text):
-    # 단순 키워드 추출 (TF-IDF 기반)
-    tfidf = TfidfVectorizer(stop_words='english', max_features=10)
-    tfidf_matrix = tfidf.fit_transform([text])
-    return tfidf.get_feature_names_out()
+    columns = ["등록일자", "시군명", "회사명", "채용공고명", "임금형태", "급여", "근무지역", "근무형태", "최소학력", "경력", "마감일자", "채용정보URL"]
+    return pd.DataFrame(data, columns=columns)
 
-def recommend_companies(user_text, user_field, user_location, user_salary):
-    vectorizer, tfidf_matrix = load_vectorizer_and_matrix()
-    user_vec = vectorizer.transform([user_text])
-    cosine_similarities = cosine_similarity(user_vec, tfidf_matrix).flatten()
+# 📌 GPT 키워드 추출 함수
+def extract_keywords_gpt(text):
+    prompt = f"다음 자기소개서에서 핵심 키워드 5개를 뽑아줘:\n{text}"
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.5
+    )
+    return response['choices'][0]['message']['content'].strip().split('\n')
 
-    company_scores = []
-    for idx, score in enumerate(cosine_similarities):
-        company = companies[idx]
-        if (user_field.lower() in company['분야'].lower() and
-            user_location in company['지역'] and
-            int(company['연봉']) <= int(user_salary)):
-            company_scores.append((company, score))
+# 🎯 유사도 기반 추천 함수
+def recommend_jobs(df, keywords, filters):
+    # 필터링
+    if filters.get("region"):
+        df = df[df["근무지역"].str.contains(filters["region"])]
+    if filters.get("career"):
+        df = df[df["경력"].str.contains(filters["career"])]
 
-    # 점수 기준 정렬 및 상위 2~3개 추천
-    company_scores.sort(key=lambda x: x[1], reverse=True)
-    top_matches = company_scores[:3] if company_scores else []
+    # TF-IDF
+    corpus = df["채용공고명"].fillna("").tolist()
+    vectorizer = TfidfVectorizer()
+    tfidf_matrix = vectorizer.fit_transform(corpus + [" ".join(keywords)])
+    
+    cosine_sim = cosine_similarity(tfidf_matrix[-1], tfidf_matrix[:-1])
+    df["유사도"] = cosine_sim[0]
+    top = df.sort_values(by="유사도", ascending=False).head(3)
 
-    # 추천 결과 구성
-    results = []
-    for company, score in top_matches:
-        results.append({
-            "회사명": company['회사명'],
-            "지역": company['지역'],
-            "분야": company['분야'],
-            "연봉": company['연봉'],
-            "유사도점수": f"{score*100:.2f}%",
-            "설명": f"'{company['회사명']}'은(는) 사용자의 관심 분야({user_field}) 및 지역({user_location})과 잘 부합하며, 연봉 조건도 충족합니다."
-        })
-    return results
+    return top[["회사명", "채용공고명", "근무지역", "급여", "채용정보URL", "유사도"]]
 
+# 🌐 라우트: 사용자 입력 처리
 @app.route("/recommend", methods=["POST"])
 def recommend():
-    try:
-        data = request.form
-        user_field = data.get("field", "")
-        user_location = data.get("location", "")
-        user_salary = data.get("salary", "0")
+    user_data = request.json
+    text = user_data.get("text", "")
+    filters = {
+        "region": user_data.get("region"),
+        "career": user_data.get("career")
+    }
 
-        # 파일 또는 텍스트 입력 처리
-        if 'file' in request.files:
-            file = request.files['file']
-            user_text = extract_text_from_pdf(file)
-        else:
-            user_text = data.get("text", "")
+    keywords = extract_keywords_gpt(text)
+    df_jobs = fetch_employment_info()
+    recommendations = recommend_jobs(df_jobs, keywords, filters)
 
-        if not user_text.strip():
-            return jsonify({"error": "이력서나 자기소개서를 입력하거나 업로드하세요."}), 400
+    # 자연어 설명 추가
+    results = []
+    for _, row in recommendations.iterrows():
+        desc = f"{row['회사명']}에서 {row['채용공고명']} 포지션을 모집 중이며, 위치는 {row['근무지역']}, 급여는 {row['급여']}입니다."
+        results.append({
+            "company": row["회사명"],
+            "position": row["채용공고명"],
+            "location": row["근무지역"],
+            "salary": row["급여"],
+            "url": row["채용정보URL"],
+            "score": round(float(row["유사도"]), 2),
+            "description": desc
+        })
 
-        recommendations = recommend_companies(user_text, user_field, user_location, user_salary)
-        return jsonify({"추천결과": recommendations})
+    return jsonify(results)
 
-    except Exception as e:
-        return jsonify({"error": str(e)})
+# ✅ 예외적 사용자 재질문 대응도 가능
+@app.route("/chat", methods=["POST"])
+def chat():
+    user_message = request.json.get("message", "")
+    # 단순 필터 요청 예시: "진주만 보여줘"
+    if "진주" in user_message:
+        df_jobs = fetch_employment_info()
+        df_filtered = df_jobs[df_jobs["근무지역"].str.contains("진주")]
+        return jsonify(df_filtered.head(5).to_dict(orient="records"))
+    return jsonify({"message": "다시 한 번 이력서를 입력해 주세요."})
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, debug=True)
+    app.run(debug=True)
