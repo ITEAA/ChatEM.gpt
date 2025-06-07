@@ -107,27 +107,38 @@ def chat():
     user_id = request.remote_addr
     message = request.form.get("message", "").strip()
     file = request.files.get("file")
-
     state = user_states.get(user_id, {})
 
     try:
-        # PDF 또는 메시지로 자기소개서 입력 처리
+        # ✅ 1. PDF 업로드
         if file:
             user_text = extract_text_from_pdf(file)
-            state = {"step": 1, "user_text": user_text}
-        elif message and "user_text" not in state:
-            state = {"step": 1, "user_text": message}
-        user_states[user_id] = state
+            state["user_text"] = user_text
+            user_states[user_id] = state
+            return jsonify({"reply": "관심 분야, 희망 근무지, 희망 연봉을 입력해 주세요. 예시: AI, 서울, 3000만원"})
 
-        if state.get("step") == 1:
-            if all(k in message for k in ["AI", "진주"]) or ("," in message and "만원" in message):
-                parts = [p.strip() for p in message.replace("만원", "").split(",")]
-                state["interest"] = parts[0] if len(parts) > 0 else ""
-                state["region"] = parts[1] if len(parts) > 1 else ""
-                state["salary"] = parts[2] if len(parts) > 2 else ""
-                state["step"] = 2
+        # ✅ 2. 관심 조건 입력 추정
+        if message and "," in message and "만원" in message:
+            parts = [p.strip() for p in message.replace("만원", "").split(",")]
+            state["interest"] = parts[0] if len(parts) > 0 else ""
+            state["region"] = parts[1] if len(parts) > 1 else ""
+            state["salary"] = parts[2] if len(parts) > 2 else ""
+            user_states[user_id] = state
+
+            if "user_text" in state:
+                state["step"] = 2  # 모든 입력이 갖춰졌으면 추천 실행
             else:
+                return jsonify({"reply": "이제 자기소개서나 이력서를 입력해 주세요."})
+
+        # ✅ 3. 자기소개서 메시지로 입력
+        if message and "user_text" not in state:
+            state["user_text"] = message
+            user_states[user_id] = state
+
+            if "interest" not in state:
                 return jsonify({"reply": "관심 분야, 희망 근무지, 희망 연봉을 입력해 주세요. 예시: AI, 서울, 3000만원"})
+            else:
+                state["step"] = 2
 
         if state.get("step") == 2:
             keywords = extract_keywords(state["user_text"])
