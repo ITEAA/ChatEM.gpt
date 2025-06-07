@@ -1,137 +1,183 @@
-import os
-import json
-import fitz  # PyMuPDF
-import openai
-from flask import Flask, request, jsonify, render_template
-from flask_cors import CORS
-from werkzeug.utils import secure_filename
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>ChatEM 기업 매칭 챗봇</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #f4f4f4;
+      margin: 0;
+      padding: 30px 0;
+      display: flex;
+      justify-content: center;
+    }
 
-app = Flask(__name__)
-CORS(app)
+    #chatContainer {
+      width: 100%;
+      max-width: 600px;
+      background: white;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+      display: flex;
+      flex-direction: column;
+    }
 
-openai.api_key = os.getenv("OPENAI_API_KEY") or "your-api-key"
+    #chatBox {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 10px;
+      background: #fafafa;
+      border-radius: 8px;
+      min-height: 300px;
+      max-height: 500px;
+      overflow-y: auto;
+    }
 
-# 전역 상태 딕셔너리 (테스트용)
-user_states = {}
+    .message {
+      padding: 10px 15px;
+      border-radius: 15px;
+      max-width: 80%;
+      word-wrap: break-word;
+      white-space: pre-wrap;
+    }
 
-# 기업 데이터 로드
-with open("jinju_companies.json", "r", encoding="utf-8") as f:
-    company_data = json.load(f)
+    .user {
+      background: #d1e7dd;
+      align-self: flex-end;
+    }
 
-def extract_text_from_pdf(pdf_file):
-    doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
-    text = "\n".join(page.get_text() for page in doc)
-    return text.strip()
+    .gpt {
+      background: #e2e3e5;
+      align-self: flex-start;
+    }
 
-def extract_keywords(text):
-    prompt = f"""
-    다음 자기소개서 또는 이력서에서 핵심 키워드를 추출해줘.
-    - 5~10개 정도 뽑아줘.
-    - 키워드는 콤마(,)로 구분해서 출력해줘.
+    #inputArea {
+      display: flex;
+      flex-direction: column;
+      margin-top: 15px;
+      gap: 10px;
+    }
 
-    내용:
-    {text}
-    """
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.4
-        )
-        result = response.choices[0].message.content
-        keywords = [kw.strip() for kw in result.split(",") if kw.strip()]
-        return keywords
-    except Exception as e:
-        print(f"❌ GPT 호출 에러: {e}")
-        return []
+    #userInput, #interestInput, #regionInput, #salaryInput {
+      padding: 10px;
+      font-size: 16px;
+      border-radius: 5px;
+      border: 1px solid #ccc;
+    }
 
-def tfidf_similarity(user_text, companies):
-    documents = [user_text] + [c.get("summary", "") for c in companies]
-    tfidf = TfidfVectorizer().fit_transform(documents)
-    cosine_sim = cosine_similarity(tfidf[0:1], tfidf[1:]).flatten()
-    scored = sorted(zip(cosine_sim, companies), key=lambda x: x[0], reverse=True)
-    return [c for score, c in scored if score > 0.1][:3]
+    #fileInput {
+      border: none;
+    }
 
-def filter_companies(keywords, interest=None, region=None, salary=None):
-    filtered = []
-    for company in company_data:
-        industry = company.get("industry", "")
-        location = company.get("region", "")
-        if interest and interest not in industry:
-            continue
-        if region and region not in location:
-            continue
-        filtered.append(company)
-    return filtered
+    #sendBtn {
+      padding: 10px;
+      font-size: 16px;
+      border: none;
+      background-color: #4CAF50;
+      color: white;
+      border-radius: 5px;
+      cursor: pointer;
+      width: 100px;
+      align-self: flex-end;
+    }
 
-def generate_reason(user_text, companies):
-    prompt = f"""
-    다음 자기소개서를 참고해서 아래의 기업들을 추천하는 이유를 간단히 설명해줘.
+    #sendBtn:hover {
+      background-color: #45a049;
+    }
+  </style>
+</head>
+<body>
+  <div id="chatContainer">
+    <h2>ChatEM</h2>
+    <div id="chatBox">
+      <div class="message gpt">안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊<br>자기소개서나 이력서를 첨부해주시면 더 정확한 추천이 가능해요!</div>
+    </div>
 
-    자기소개서:
-    {user_text}
+    <div id="inputArea">
+      <textarea id="userInput" placeholder="자기소개서 또는 메시지를 입력하세요..." rows="3"></textarea>
+      <input type="text" id="interestInput" placeholder="예: 자율주행, AI, 물류" />
+      <input type="text" id="regionInput" placeholder="예: 진주, 서울" />
+      <input type="text" id="salaryInput" placeholder="예: 3200만원" />
+      <input type="file" id="fileInput" />
+      <button id="sendBtn" onclick="sendMessage()">보내기</button>
+    </div>
+  </div>
 
-    기업 목록:
-    {json.dumps(companies, ensure_ascii=False)}
+  <script>
+    const input = document.getElementById("userInput");
+    const chatBox = document.getElementById("chatBox");
+    const fileInput = document.getElementById("fileInput");
+    const interestInput = document.getElementById("interestInput");
+    const regionInput = document.getElementById("regionInput");
+    const salaryInput = document.getElementById("salaryInput");
 
-    결과는 각 기업에 대해 \"기업명: 추천 사유\" 형식으로 출력해줘.
-    """
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.4
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        print(f"❌ GPT 추천 설명 생성 에러: {e}")
-        return "추천 이유를 생성하는 중 오류가 발생했습니다."
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
 
-@app.route("/")
-def index():
-    return render_template("index.html")
+    async function sendMessage() {
+      const message = input.value.trim();
+      const file = fileInput.files[0];
+      const interest = interestInput.value.trim();
+      const region = regionInput.value.trim();
+      const salary = salaryInput.value.trim();
 
-@app.route("/chat", methods=["POST"])
-def chat():
-    user_id = request.remote_addr  # 사용자 구분 ID (간단 버전)
-    message = request.form.get("message", "").strip()
-    interest = request.form.get("interest", "").strip()
-    region = request.form.get("region", "").strip()
-    salary = request.form.get("salary", "").strip()
-    file = request.files.get("file")
+      if (!message && !file) return;
 
-    state = user_states.get(user_id, {})
+      const userDiv = document.createElement("div");
+      userDiv.className = "message user";
+      userDiv.innerText = message || [이력서/자기소개서 업로드됨: ${file.name}];
+      chatBox.appendChild(userDiv);
 
-    try:
-        # Step 0: 파일 업로드 or 메시지 입력
-        if file:
-            user_text = extract_text_from_pdf(file)
-            state = {"step": 1, "user_text": user_text}
-            user_states[user_id] = state
-        elif message and not state.get("user_text"):
-            state = {"step": 1, "user_text": message}
-            user_states[user_id] = state
+      const loadingDiv = document.createElement("div");
+      loadingDiv.className = "message gpt";
+      loadingDiv.innerText = "분석 중입니다. 잠시만 기다려주세요...";
+      chatBox.appendChild(loadingDiv);
 
-        # Step 1: 정보 수집 (관심 분야, 지역)
-        if state.get("step") == 1:
-            state.update({"interest": interest, "region": region, "salary": salary})
+      const formData = new FormData();
+      formData.append("message", message);
+      formData.append("interest", interest);
+      formData.append("region", region);
+      formData.append("salary", salary);
+      if (file) formData.append("file", file);
 
-            keywords = extract_keywords(state["user_text"])
-            filtered = filter_companies(keywords, interest, region, salary)
-            matched = tfidf_similarity(state["user_text"], filtered)
-            explanation = generate_reason(state["user_text"], matched)
+      try {
+        const response = await fetch("/chat", {
+          method: "POST",
+          body: formData,
+        });
 
-            user_states.pop(user_id, None)
+        const contentType = response.headers.get("content-type") || "";
 
-            return jsonify({"reply": explanation})
+        if (!response.ok) {
+          throw new Error(서버 응답 오류: ${response.status});
+        }
 
-        return jsonify({"reply": "자기소개서 또는 메시지를 먼저 입력해 주세요."})
+        if (contentType.includes("application/json")) {
+          const data = await response.json();
+          loadingDiv.innerText = data.reply;
+        } else {
+          const text = await response.text();
+          loadingDiv.innerText = "❌ 예상치 못한 응답 형식:\n" + text;
+        }
+      } catch (err) {
+        loadingDiv.innerText = "❌ 오류 발생: " + err.message;
+      }
 
-    except Exception as e:
-        print(f"❌ 서버 에러: {e}")
-        return jsonify({"reply": f"❌ 오류 발생: {str(e)}"}), 500
-
-if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=8080)
+      input.value = "";
+      interestInput.value = "";
+      regionInput.value = "";
+      salaryInput.value = "";
+      fileInput.value = null;
+      input.focus();
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+  </script>
+</body>
+</html>
