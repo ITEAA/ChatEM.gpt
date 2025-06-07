@@ -13,10 +13,8 @@ CORS(app)
 
 openai.api_key = os.getenv("OPENAI_API_KEY") or "your-api-key"
 
-# 전역 상태 딕셔너리 (테스트용)
 user_states = {}
 
-# 기업 데이터 로드
 with open("jinju_companies.json", "r", encoding="utf-8") as f:
     company_data = json.load(f)
 
@@ -52,7 +50,7 @@ def tfidf_similarity(user_text, companies):
     tfidf = TfidfVectorizer().fit_transform(documents)
     cosine_sim = cosine_similarity(tfidf[0:1], tfidf[1:]).flatten()
     scored = sorted(zip(cosine_sim, companies), key=lambda x: x[0], reverse=True)
-    return [c for score, c in scored if score > 0.1][:3]
+    return [(c, round(score, 2)) for score, c in scored if score > 0.1][:3]
 
 def filter_companies(keywords, interest=None, region=None, salary=None):
     filtered = []
@@ -66,23 +64,38 @@ def filter_companies(keywords, interest=None, region=None, salary=None):
         filtered.append(company)
     return filtered
 
-def generate_reason(user_text, companies):
+def generate_reason(user_text, companies_with_scores):
+    companies_info = []
+    for company, score in companies_with_scores:
+        companies_info.append({"name": company.get("name"), "summary": company.get("summary"), "score": score})
+
     prompt = f"""
-    다음 자기소개서를 참고해서 아래의 기업들을 추천하는 이유를 간단히 설명해줘.
+당신은 채용 컨설턴트 역할을 수행하고 있습니다.
+아래 자기소개서와 기업 정보를 참고하여, 각 기업이 사용자에게 왜 적합한지 친절하고 전문적인 말투로 설명해 주세요.
 
-    자기소개서:
-    {user_text}
+[자기소개서 내용]
+"""
+{user_text}
+"""
 
-    기업 목록:
-    {json.dumps(companies, ensure_ascii=False)}
+[기업 목록 및 유사도 점수]
+{json.dumps(companies_info, ensure_ascii=False)}
 
-    결과는 각 기업에 대해 \"기업명: 추천 사유\" 형식으로 출력해줘.
-    """
+아래 형식에 맞춰 작성해 주세요:
+
+기업명: 설명 (자기소개서 내용 일부를 언급하며)
+유사도 점수: (예: 0.85)
+
+예시:
+1. 삼성전자
+- 귀하께서 문제 해결을 위해 파이썬 코드를 직접 분석하고 개선한 경험은 삼성전자 R&D 직무와 매우 밀접한 관련이 있습니다. 특히 자율주행 차량 프로젝트에서의 분석력과 끈기는 큰 장점입니다.
+- 유사도 점수: 0.85
+"""
     try:
         response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.4
+            temperature=0.3
         )
         return response.choices[0].message.content
     except Exception as e:
@@ -95,7 +108,7 @@ def index():
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    user_id = request.remote_addr  # 사용자 구분 ID (간단 버전)
+    user_id = request.remote_addr
     message = request.form.get("message", "").strip()
     interest = request.form.get("interest", "").strip()
     region = request.form.get("region", "").strip()
@@ -105,7 +118,6 @@ def chat():
     state = user_states.get(user_id, {})
 
     try:
-        # Step 0: 파일 업로드 or 메시지 입력
         if file:
             user_text = extract_text_from_pdf(file)
             state = {"step": 1, "user_text": user_text}
@@ -114,14 +126,13 @@ def chat():
             state = {"step": 1, "user_text": message}
             user_states[user_id] = state
 
-        # Step 1: 정보 수집 (관심 분야, 지역)
         if state.get("step") == 1:
             state.update({"interest": interest, "region": region, "salary": salary})
 
             keywords = extract_keywords(state["user_text"])
             filtered = filter_companies(keywords, interest, region, salary)
-            matched = tfidf_similarity(state["user_text"], filtered)
-            explanation = generate_reason(state["user_text"], matched)
+            matched_with_scores = tfidf_similarity(state["user_text"], filtered)
+            explanation = generate_reason(state["user_text"], matched_with_scores)
 
             user_states.pop(user_id, None)
 
