@@ -6,6 +6,7 @@ import pickle
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 from sklearn.metrics.pairwise import cosine_similarity
+import random
 
 app = Flask(__name__)
 CORS(app)
