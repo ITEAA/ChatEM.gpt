@@ -122,7 +122,6 @@ def chat():
             user_text = extract_text_from_pdf(file)
             state["user_text"] = user_text
             user_states[user_id] = state
-            return jsonify({"reply": "관심 분야, 희망 근무지, 희망 연봉을 입력해 주세요. 예시: AI, 서울, 3000만원"})
 
         if message and "," in message and "만원" in message:
             parts = [p.strip() for p in message.replace("만원", "").split(",")]
@@ -131,21 +130,12 @@ def chat():
             state["salary"] = parts[2] if len(parts) > 2 else ""
             user_states[user_id] = state
 
-            if "user_text" in state:
-                state["step"] = 2
-            else:
-                return jsonify({"reply": "이제 자기소개서나 이력서를 입력해 주세요."})
-
         if message and "user_text" not in state:
             state["user_text"] = message
             user_states[user_id] = state
 
-            if "interest" not in state:
-                return jsonify({"reply": "관심 분야, 희망 근무지, 희망 연봉을 입력해 주세요. 예시: AI, 서울, 3000만원"})
-            else:
-                state["step"] = 2
-
-        if state.get("step") == 2:
+        # 추천 조건이 모두 갖춰졌는지 확인
+        if "user_text" in state and "interest" in state:
             keywords = extract_keywords(state["user_text"])
             filtered = filter_companies(keywords, state.get("interest"), state.get("region"), state.get("salary"))
             if not filtered:
@@ -172,7 +162,16 @@ def chat():
                 user_states.pop(user_id, None)
                 return jsonify({"reply": explanation})
 
-        return jsonify({"reply": "먼저 자기소개서 또는 이력서를 입력해 주세요."})
+        # 아직 모든 정보가 안 채워졌을 경우 안내 메시지 출력
+        missing = []
+        if "user_text" not in state:
+            missing.append("자기소개서 또는 이력서")
+        if "interest" not in state:
+            missing.append("관심 분야, 희망 근무지, 희망 연봉")
+        if missing:
+            return jsonify({"reply": f"먼저 {', '.join(missing)}를 입력해 주세요."})
+
+        return jsonify({"reply": "입력을 인식하지 못했습니다. 다시 시도해 주세요."})
 
     except Exception as e:
         print(f"❌ 서버 에러: {e}")
