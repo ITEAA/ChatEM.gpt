@@ -5,7 +5,6 @@ import openai
 import pickle
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
-from werkzeug.utils import secure_filename
 from sklearn.metrics.pairwise import cosine_similarity
 
 app = Flask(__name__)
@@ -15,15 +14,13 @@ openai.api_key = os.getenv("OPENAI_API_KEY") or "your-api-key"
 
 user_states = {}
 
-# Load precomputed data
-with open("companies_top1000.json", "r", encoding="utf-8") as f:
-    company_data = json.load(f)
-
-with open("vectorizer.pkl", "rb") as f:
+# 사전 계산된 데이터 로딩
+with open("ChatEM_vectorizer.pkl", "rb") as f:
     vectorizer = pickle.load(f)
-
-with open("tfidf_matrix.pkl", "rb") as f:
+with open("ChatEM_tfidf_matrix.pkl", "rb") as f:
     tfidf_matrix = pickle.load(f)
+with open("ChatEM_companies_top1000.json", "r", encoding="utf-8") as f:
+    company_data = json.load(f)
 
 def extract_text_from_pdf(pdf_file):
     doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
@@ -53,25 +50,32 @@ def extract_keywords(text):
         return []
 
 def tfidf_similarity(user_text):
-    try:
-        user_vec = vectorizer.transform([user_text])
-        cosine_sim = cosine_similarity(user_vec, tfidf_matrix).flatten()
-        scored = list(zip(cosine_sim, company_data))
-        scored.sort(key=lambda x: x[0], reverse=True)
+    user_vec = vectorizer.transform([user_text])
+    cosine_sim = cosine_similarity(user_vec, tfidf_matrix).flatten()
+    scored = list(zip(cosine_sim, company_data))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    adjusted_scores = []
+    for score, company in scored:
+        if score < 0.6:
+            fake_score = round(random.uniform(0.60, 0.70), 2)
+        elif score > 0.9:
+            fake_score = round(random.uniform(0.90, 0.95), 2)
+        else:
+            fake_score = round(score, 2)
+        adjusted_scores.append((company, fake_score))
+    return adjusted_scores
 
-        adjusted_scores = []
-        for score, company in scored:
-            if score < 0.6:
-                fake_score = round(random.uniform(0.60, 0.70), 2)
-            elif score > 0.9:
-                fake_score = round(random.uniform(0.90, 0.95), 2)
-            else:
-                fake_score = round(score, 2)
-            adjusted_scores.append((company, fake_score))
-        return adjusted_scores
-    except Exception as e:
-        print(f"❌ TF-IDF 유사도 계산 오류: {e}")
-        return []
+def filter_companies(companies, interest=None, region=None):
+    filtered = []
+    for company in companies:
+        industry = company.get("industry", "")
+        location = company.get("region", "")
+        if interest and interest not in industry:
+            continue
+        if region and region not in location:
+            continue
+        filtered.append(company)
+    return filtered
 
 def generate_reason(user_text, companies_with_scores):
     companies_info = []
@@ -81,7 +85,6 @@ def generate_reason(user_text, companies_with_scores):
             "summary": company.get("summary"),
             "score": score
         })
-
     prompt = f"""
 당신은 채용 컨설턴트입니다.
 아래 자기소개서와 기업 정보를 참고하여, 각 기업이 사용자에게 왜 적합한지 친절하고 전문적인 말투로 설명해 주세요.
@@ -137,9 +140,11 @@ def chat():
 
         if "user_text" in state and "interest" in state and "step" not in state:
             matched = tfidf_similarity(state["user_text"])
-            state["all_matches"] = matched
+            filtered = filter_companies([c for c, _ in matched], state.get("interest"), state.get("region"))
+            matched_filtered = [(c, s) for c, s in matched if c in filtered]
+            state["all_matches"] = matched_filtered
             state["shown_indices"] = [0, 1, 2]
-            selected = [matched[i] for i in state["shown_indices"] if i < len(matched)]
+            selected = [matched_filtered[i] for i in state["shown_indices"] if i < len(matched_filtered)]
             explanation = generate_reason(state["user_text"], selected)
             state["step"] = 3
             state["last_result"] = explanation
@@ -164,7 +169,9 @@ def chat():
             else:
                 combined_text = state["user_text"] + "\n\n[사용자 추가 입력]: " + message
                 matched = tfidf_similarity(combined_text)
-                selected = matched[:3]
+                filtered = filter_companies([c for c, _ in matched], state.get("interest"), state.get("region"))
+                matched_filtered = [(c, s) for c, s in matched if c in filtered]
+                selected = matched_filtered[:3]
                 explanation = generate_reason(combined_text, selected)
                 user_states.pop(user_id, None)
                 return jsonify({"reply": explanation})
