@@ -155,8 +155,22 @@ def chat():
             if not matched_with_scores:
                 return jsonify({"reply": "기업 추천에 실패했습니다. 다시 시도해 주세요."})
             explanation = generate_reason(state["user_text"], matched_with_scores)
-            user_states.pop(user_id, None)
-            return jsonify({"reply": explanation})
+            state["step"] = 3
+            state["last_result"] = explanation
+            user_states[user_id] = state
+            return jsonify({"reply": explanation + "\n\n더 궁금한 점이나 고려하고 싶은 조건이 있으면 입력해 주세요. 추가로 반영해 드릴게요."})
+
+        if state.get("step") == 3:
+            if message:
+                combined_text = state["user_text"] + "\n\n[사용자 추가 입력]: " + message
+                keywords = extract_keywords(combined_text)
+                filtered = filter_companies(keywords, state.get("interest"), state.get("region"), state.get("salary"))
+                if not filtered:
+                    filtered = company_data
+                matched_with_scores = tfidf_similarity(combined_text, filtered)
+                explanation = generate_reason(combined_text, matched_with_scores)
+                user_states.pop(user_id, None)
+                return jsonify({"reply": explanation})
 
         return jsonify({"reply": "먼저 자기소개서 또는 이력서를 입력해 주세요."})
 
