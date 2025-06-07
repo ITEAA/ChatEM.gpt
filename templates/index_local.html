@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>테스트용 기업 추천</title>
+</head>
+<body>
+  <h2>📄 자기소개서 기반 기업 추천 테스트</h2>
+  <textarea id="resumeText" rows="10" cols="80" placeholder="여기에 자기소개서를 입력하세요..."></textarea><br><br>
+  <label>희망 지역: <input type="text" id="region" placeholder="예: 수원"></label><br><br>
+  <label>경력 조건: <input type="text" id="career" placeholder="예: 무관, 신입, 경력"></label><br><br>
+  <button onclick="submitForm()">기업 추천 받기</button>
+  <h3>📌 추천 결과:</h3>
+  <pre id="resultBox"></pre>
+  <script>
+    async function submitForm() {
+      const text = document.getElementById("resumeText").value;
+      const region = document.getElementById("region").value;
+      const career = document.getElementById("career").value;
+      const response = await fetch("/recommend-local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, region, career })
+      });
+      const data = await response.json();
+      document.getElementById("resultBox").textContent = JSON.stringify(data, null, 2);
+    }
+  </script>
+</body>
+</html>
