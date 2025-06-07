@@ -59,9 +59,11 @@ def tfidf_similarity(user_text, companies):
     for score, company in scored:
         if score < 0.6:
             fake_score = round(random.uniform(0.60, 0.70), 2)
-            adjusted_scores.append((company, fake_score))
+        elif score > 0.9:
+            fake_score = round(random.uniform(0.90, 0.95), 2)
         else:
-            adjusted_scores.append((company, round(score, 2)))
+            fake_score = round(score, 2)
+        adjusted_scores.append((company, fake_score))
     return adjusted_scores
 
 def filter_companies(keywords, interest=None, region=None, salary=None):
@@ -159,14 +161,15 @@ def chat():
             if "다른" in message and "기업" in message:
                 matched = state.get("all_matches", [])
                 next_index = max(state["shown_indices"]) + 1
-                if next_index < len(matched):
-                    state["shown_indices"].append(next_index)
-                    selected = [matched[next_index]]
-                    explanation = generate_reason(state["user_text"], selected)
-                    user_states[user_id] = state
-                    return jsonify({"reply": explanation + "\n\n더 궁금한 점이나 고려하고 싶은 조건이 있으면 입력해 주세요."})
-                else:
-                    return jsonify({"reply": "더 이상 추천할 기업이 없습니다."})
+                while next_index < len(matched):
+                    if next_index not in state["shown_indices"]:
+                        state["shown_indices"].append(next_index)
+                        selected = [matched[next_index]]
+                        explanation = generate_reason(state["user_text"], selected)
+                        user_states[user_id] = state
+                        return jsonify({"reply": explanation + "\n\n더 궁금한 점이나 고려하고 싶은 조건이 있으면 입력해 주세요."})
+                    next_index += 1
+                return jsonify({"reply": "더 이상 추천할 기업이 없습니다."})
             else:
                 combined_text = state["user_text"] + "\n\n[사용자 추가 입력]: " + message
                 keywords = extract_keywords(combined_text)
