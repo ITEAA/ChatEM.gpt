@@ -38,8 +38,7 @@ def fetch_employment_info(index=1, size=100):
 
 # 📌 GPT 키워드 추출 함수
 def extract_keywords_gpt(text):
-    prompt = f"다음 자기소개서에서 핵심 키워드 5개를 뽑아줘:
-{text}"
+    prompt = f"다음 자기소개서에서 핵심 키워드 5개를 뽑아줘: {text}"
     response = openai.ChatCompletion.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}],
