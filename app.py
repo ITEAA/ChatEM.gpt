@@ -1,85 +1,76 @@
-from flask import Flask, request, jsonify, render_template
-import pandas as pd
-import json
 import os
-import openai
+import json
+from flask import Flask, render_template, request, jsonify
+from openai import OpenAI
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# Flask 앱 생성
 app = Flask(__name__)
 
-# ✅ OpenAI 클라이언트 초기화
-client = openai.OpenAI()
+# ✅ OPENAI 키 불러오기 (.env 대신 fly.io secrets 사용)
+openai_api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=openai_api_key)
 
-# ✅ ChatEM 기업 top20 데이터 로드
-with open("ChatEM_top20_companies.json", encoding="utf-8") as f:
-    top20_data = json.load(f)
-df_companies = pd.DataFrame(top20_data)
+# 더미 기업 데이터 로드
+with open("ChatEM_top20_companies.json", "r", encoding="utf-8") as f:
+    companies = json.load(f)
 
-# ✅ GPT 키워드 추출 함수 (텍스트 기반)
-def extract_keywords_gpt(text):
-    prompt = f"다음 자기소개서에서 핵심 키워드 5개를 뽑아줘:\n{text}"
-    response = client.chat.completions.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.5
-    )
-    content = response.choices[0].message.content.strip()
-    return content.split('\n')
-
-# ✅ 기업 추천 함수
-def recommend_companies(user_keywords):
-    user_profile = " ".join(user_keywords)
-    df_companies["combined_text"] = (
-        df_companies["name"].fillna('') + " " +
-        df_companies["summary"].fillna('') + " " +
-        df_companies["region"].fillna('') + " " +
-        df_companies["industry"].fillna('')
-    )
+# TF-IDF 기반 유사도 계산 함수
+def compute_similarity(user_text, companies):
+    corpus = [user_text] + [c["description"] for c in companies]
     vectorizer = TfidfVectorizer()
-    tfidf_matrix = vectorizer.fit_transform(df_companies["combined_text"].tolist() + [user_profile])
-    cosine_sim = cosine_similarity(tfidf_matrix[-1], tfidf_matrix[:-1])[0]
-    df_companies["유사도"] = cosine_sim
-    top = df_companies.sort_values(by="유사도", ascending=False).head(3)
-    return top
+    tfidf_matrix = vectorizer.fit_transform(corpus)
+    similarity = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:]).flatten()
+    return similarity
 
-# ✅ index.html 렌더링
 @app.route("/")
 def index():
     return render_template("index.html")
 
-# ✅ 추천 결과 JSON 응답
-@app.route("/recommend", methods=["POST"])
-def recommend():
-    user_data = request.json
-    text = user_data.get("text", "")
-    region = user_data.get("region", "")
-    salary = user_data.get("salary", "")
-    interest = user_data.get("interest", "")
+@app.route("/analyze", methods=["POST"])
+def analyze():
+    data = request.get_json()
+    user_text = data.get("text")
 
-    keywords = extract_keywords_gpt(text)
-    if region:
-        keywords.append(region)
-    if salary:
-        keywords.append(salary)
-    if interest:
-        keywords.append(interest)
+    if not user_text:
+        return jsonify({"error": "자기소개서 내용이 없습니다."}), 400
 
-    results = recommend_companies(keywords)
+    # ✅ GPT로 키워드 추출 (ChatCompletion 최신 방식 사용)
+    prompt = f"""
+다음 자기소개서에서 핵심 키워드를 5개 추출해줘. 
+형식: 키워드1, 키워드2, ...
+자기소개서:
+{user_text}
+"""
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "너는 채용담당자야."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3
+        )
+        keywords = response.choices[0].message.content.strip()
+    except Exception as e:
+        return jsonify({"error": f"GPT 응답 오류: {str(e)}"}), 500
 
-    output = []
-    for _, row in results.iterrows():
-        desc = f"{row['name']}에서 {row['summary']} 직무를 채용 중이며, 위치는 {row['region']}입니다."
-        output.append({
-            "company": row["name"],
-            "location": row["region"],
-            "industry": row["industry"],
-            "url": row["url"],
-            "score": round(float(row["유사도"]), 2),
-            "description": desc
-        })
-    return jsonify(output)
+    # TF-IDF 유사도 계산
+    similarity_scores = compute_similarity(user_text, companies)
+    top_indices = similarity_scores.argsort()[-3:][::-1]
+    top_matches = [
+        {
+            "company": companies[i]["name"],
+            "score": round(similarity_scores[i] * 100, 2),
+            "description": companies[i]["description"]
+        }
+        for i in top_indices
+    ]
+
+    return jsonify({
+        "keywords": keywords,
+        "matches": top_matches
+    })
 
 if __name__ == "__main__":
     app.run(debug=True)
