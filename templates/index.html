@@ -98,9 +98,6 @@
 
     <div id="inputArea">
       <textarea id="userInput" placeholder="자기소개서 또는 메시지를 입력하세요..." rows="3"></textarea>
-      <input type="text" id="interestInput" placeholder="예: 자율주행, AI, 물류" />
-      <input type="text" id="regionInput" placeholder="예: 진주, 서울" />
-      <input type="text" id="salaryInput" placeholder="예: 3200만원" />
       <input type="file" id="fileInput" />
       <button id="sendBtn" onclick="sendMessage()">보내기</button>
     </div>
@@ -124,9 +121,6 @@
     async function sendMessage() {
       const message = input.value.trim();
       const file = fileInput.files[0];
-      const interest = interestInput.value.trim();
-      const region = regionInput.value.trim();
-      const salary = salaryInput.value.trim();
 
       if (!message && !file) return;
 
@@ -142,9 +136,6 @@
 
       const formData = new FormData();
       formData.append("message", message);
-      formData.append("interest", interest);
-      formData.append("region", region);
-      formData.append("salary", salary);
       if (file) formData.append("file", file);
 
       try {
