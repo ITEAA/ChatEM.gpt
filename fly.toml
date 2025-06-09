@@ -1,7 +1,12 @@
 app = "chatemmain-old-darkness-6967"
 
+primary_region = "sjc"
+
 [env]
   PORT = "8080"
+
+[build]
+  image = ""
 
 [[services]]
   internal_port = 8080
@@ -23,9 +28,9 @@ app = "chatemmain-old-darkness-6967"
 
   [[services.http_checks]]
     interval = "10s"
-    timeout = "2s"
+    timeout = "5s"
     grace_period = "5s"
     method = "get"
-    path = "/"
+    path = "/health"
     protocol = "http"
     tls_skip_verify = false
