@@ -93,6 +93,21 @@ def tfidf_similarity(user_text, companies):
         adjusted_scores.append((company, fake_score))
     return adjusted_scores
 
+def filter_companies(keywords, interest=None, region=None, salary=None):
+    gg_companies = fetch_gg_employment_info()
+    all_companies = company_data + gg_companies
+
+    filtered = []
+    for company in all_companies:
+        industry = company.get("industry", "") or company.get("채용공고명", "")
+        location = company.get("region", "") or company.get("근무지역", "") or company.get("시군명", "")
+        if interest and interest not in industry:
+            continue
+        if region and region not in location:
+            continue
+        filtered.append(company)
+    return filtered
+
 def generate_reason(user_text, companies_with_scores):
     companies_info = []
     for company, score in companies_with_scores:
