@@ -1,10 +1,16 @@
-
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, send_from_directory
 import pandas as pd
 import json
 import openai
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from flask import Flask, request, jsonify, render_template, send_from_directory
+import os
+
+# index.html 라우팅 추가
+@app.route('/')
+def index():
+    return render_template('index.html')
 
 app = Flask(__name__)
 
