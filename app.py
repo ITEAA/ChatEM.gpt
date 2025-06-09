@@ -310,10 +310,13 @@ def make_recommendations(user_text, interest=None, region=None, salary=None, sho
 
     results = []
     for company, base_score in tfidf_ranked_companies:
-        if not company.get("name"):
+        company_name = company.get("회사명") or company.get("name")
+        company_summary = company.get("채용공고명") or company.get("summary")
+        
+        if not company_name or not company_summary:
             continue
-
-        company_key = (company.get("name"), company.get("summary"))
+        
+        company_key = (company_name, company_summary)
         if company_key in shown_companies_set:
             continue
 
