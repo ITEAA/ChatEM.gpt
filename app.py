@@ -103,13 +103,27 @@ def kobert_similarity(user_text, companies):
 # GPT 설명 생성
 def generate_reason_individual(user_text, company, score):
     prompt = f"""
-    사용자의 자기소개서를 기반으로 아래 기업과 직무가 어떻게 연관되는지 설명해줘.
+    너는 지금부터 사용자의 특성과 선호도를 파악해 가장 적합한 기업을 추천해주는 역할을 수행한다. 다음 지침을 따라:
 
-    기업명: {company.get('회사명')}
-    채용공고명: {company.get('채용공고명')}
-    유사도 점수: {round(score, 2)}
+    1. 동작 모드
+    - 사용자가 이력서를 제공했으므로 분석 모드로 자동 진입
+    - 사용자의 자기소개서 내용과 해당 기업 정보를 기반으로 추천 이유를 분석하고 제공한다
 
-    자기소개서:
+    2. 금지된 표현 사용 금지
+    - "분석모드입니다", "모드를 전환합니다" 등 시스템 작동 문구는 절대 사용하지 마라
+    - 실패 시에는 "현재 정보만으로는 분석이 어렵습니다" 등 자연스러운 안내만 사용한다
+
+    3. 대화 스타일
+    - 친절하고 전문적인 어조로 작성하되, 설명은 자연스럽고 명확하게 전달하라
+
+    아래 정보를 바탕으로, 사용자의 자기소개서 내용을 요약하고, 기업과 어떻게 연결되는지 설명해줘.
+
+    [기업 정보]
+    - 기업명: {company.get('회사명')}
+    - 채용공고명: {company.get('채용공고명')}
+    - 유사도 점수: {round(score, 2)}
+
+    [사용자 자기소개서]
     {user_text}
 
     [설명 시작]
@@ -125,8 +139,6 @@ def generate_reason_individual(user_text, company, score):
         print("GPT 설명 생성 실패:", e)
         return "설명을 생성하는 데 실패했습니다."
 
-# 추천 API
-@app.route("/recommend", methods=["POST"])
 def recommend():
     data = request.json
     user_text = data.get("text", "")
