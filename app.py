@@ -314,18 +314,14 @@ def make_recommendations(user_text, interest=None, region=None, salary=None, sho
             continue
 
         company_key = (company.get("name"), company.get("summary"))
-        if json.dumps(company_key, ensure_ascii=False) in shown_companies_set:
+        if company_key in shown_companies_set:
             continue
 
-        # 조건 기반 필터링 → 너무 엄격하지 않도록 완화
         boost = 0.0
-
-        if interest and interest.lower() in company.get("summary", "").lower():
-            boost += 0.1  # 기존 0.02보다 더 영향 주게
-        
-        if region and region.lower() in company.get("region", "").lower():
+        if interest and interest.lower() in str(company.get("summary", "")).lower():
+            boost += 0.1
+        if region and region.lower() in str(company.get("region", "")).lower():
             boost += 0.05
-        
         if salary:
             try:
                 salary_int = int(salary)
@@ -333,36 +329,24 @@ def make_recommendations(user_text, interest=None, region=None, salary=None, sho
                 if min_salary >= salary_int:
                     boost += 0.05
             except:
-                pass  # 연봉 추출 실패 시 무시
+                pass
 
         final_score = base_score + boost
+        # 너무 낮은 유사도도 포함시키기 위해 필터 제거
         results.append((company, final_score))
 
-    # 점수 높은 순으로 정렬
+    # 유사도 기준 정렬
     results.sort(key=lambda x: x[1], reverse=True)
 
-    # top_n개 반환 (중복 방지)
+    # 상위 top_n개만 반환
     top_results = []
-    used_keys = set()
-    
     for comp, sim in results:
-        comp_id = json.dumps((comp.get("name"), comp.get("summary")), ensure_ascii=False)
+        comp_id = (comp.get("name"), comp.get("summary"))
         if comp_id not in shown_companies_set:
             shown_companies_set.add(comp_id)
             top_results.append((comp, sim))
-            used_keys.add(comp_id)
         if len(top_results) >= top_n:
             break
-    
-    # 보완: 충분히 못 채운 경우 중복을 허용해서라도 top_n 채우기
-    if len(top_results) < top_n:
-        for comp, sim in results:
-            comp_id = json.dumps((comp.get("name"), comp.get("summary")), ensure_ascii=False)
-            if comp_id in used_keys:
-                continue  # 이미 추가된 기업은 제외
-            top_results.append((comp, sim))
-            if len(top_results) >= top_n:
-                break
 
     return top_results
 
