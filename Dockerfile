@@ -12,4 +12,4 @@ EXPOSE 8080
 
 CMD ["gunicorn", "-b", "0.0.0.0:8080", "--timeout", "120", "app:app"]
 
-COPY jinju_companies.json ./
+COPY ChatEM_top20_companies.json ./
