@@ -510,6 +510,10 @@ def chat():
         print(f"❌ 서버 에러: {e}")
         traceback.print_exc() # 서버 전체 오류 스택 트레이스 출력
         return jsonify({"reply": f"❌ 오류가 발생했습니다: {str(e)} 불편을 드려 죄송합니다. 잠시 후 다시 시도해 주세요."}), 500
-
+        
+@app.route("/health", methods=["GET"])
+def health_check():
+    return "OK", 200
+    
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=8080)
