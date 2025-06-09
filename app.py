@@ -320,21 +320,18 @@ def make_recommendations(user_text, interest=None, region=None, salary=None, sho
         # 조건 기반 필터링 → 너무 엄격하지 않도록 완화
         boost = 0.0
 
-        if interest:
-            if interest.lower() in company.get("summary", "").lower():
-                boost += 0.02
-
-        if region:
-            if region.lower() in company.get("region", "").lower():
-                boost += 0.01
-
+        if interest and interest.lower() in company.get("summary", "").lower():
+            boost += 0.1  # 기존 0.02보다 더 영향 주게
+        
+        if region and region.lower() in company.get("region", "").lower():
+            boost += 0.05
+        
         if salary:
             try:
                 salary_int = int(salary)
                 min_salary, max_salary = parse_salary_info(company.get("summary", ""))
                 if min_salary >= salary_int:
-                    boost += 0.01
-                # else는 무시 (연봉이 낮아도 제외 안 함)
+                    boost += 0.05
             except:
                 pass  # 연봉 추출 실패 시 무시
 
@@ -346,13 +343,26 @@ def make_recommendations(user_text, interest=None, region=None, salary=None, sho
 
     # top_n개 반환 (중복 방지)
     top_results = []
+    used_keys = set()
+    
     for comp, sim in results:
         comp_id = json.dumps((comp.get("name"), comp.get("summary")), ensure_ascii=False)
         if comp_id not in shown_companies_set:
             shown_companies_set.add(comp_id)
             top_results.append((comp, sim))
+            used_keys.add(comp_id)
         if len(top_results) >= top_n:
             break
+    
+    # 보완: 충분히 못 채운 경우 중복을 허용해서라도 top_n 채우기
+    if len(top_results) < top_n:
+        for comp, sim in results:
+            comp_id = json.dumps((comp.get("name"), comp.get("summary")), ensure_ascii=False)
+            if comp_id in used_keys:
+                continue  # 이미 추가된 기업은 제외
+            top_results.append((comp, sim))
+            if len(top_results) >= top_n:
+                break
 
     return top_results
 
