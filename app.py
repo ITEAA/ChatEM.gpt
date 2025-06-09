@@ -363,155 +363,108 @@ def index():
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    # 사용자 ID가 세션에 없으면 새로 생성
     if 'user_id' not in session:
         session['user_id'] = str(uuid.uuid4())
     user_id = session['user_id']
-    
-    # user_states 딕셔너리에서 현재 사용자 상태 로드.
-    # set 객체는 JSON 직렬화가 안 되므로, 로드/저장 시 set을 list/tuple로 변환해야 함.
-    # 여기서는 in-memory이므로 직접 set으로 유지.
+
     state = user_states.get(user_id, {
-        "shown": set(), # 이미 추천된 기업 목록 (중복 추천 방지)
-        "user_text": None, # 사용자의 자기소개서/이력서 텍스트
-        "interest": None, # 사용자 관심 분야
-        "region": None, # 사용자 희망 근무지
-        "salary": None # 사용자 희망 연봉
+        "shown": set(),
+        "user_text": None,
+        "interest": None,
+        "region": None,
+        "salary": None
     })
 
     message = request.form.get("message", "").strip()
     file = request.files.get("file")
 
     try:
-        # 1. 파일 첨부 시 자기소개서/이력서 추출
+        # 1. 파일 업로드 시
         if file and file.filename != '':
             user_text = extract_text_from_pdf(file)
             if user_text:
                 state["user_text"] = user_text
-                # 파일 업로드 시에는 기존 추천 이력을 초기화
                 state["shown"] = set()
-                user_states[user_id] = state # 상태 업데이트
+                user_states[user_id] = state
                 return jsonify({"reply": "이력서/자기소개서 내용을 확인했습니다. 아래 항목 중에서 관심 분야를 선택해주세요:\n1. IT  2. 제조  3. 서비스  4. 마케팅  5. 상관 없음"})
             else:
-                return jsonify({"reply": "PDF 파일에서 텍스트를 추출하는 데 실패했습니다. 파일이 스캔된 이미지 기반이거나 손상되었을 수 있습니다. 텍스트를 직접 입력해 주시거나 다른 파일을 시도해 주시겠어요?"})
+                return jsonify({"reply": "PDF 파일에서 텍스트를 추출하는 데 실패했습니다. 다른 파일을 시도해 주세요."})
 
-        # 2. 파일 없이 메시지만 있을 경우
+        # 2. 텍스트 입력 시 자소서로 간주
         if state["user_text"] is None:
-            # 메시지 길이가 길거나 특정 키워드를 포함하면 자기소개서/이력서로 간주
             if len(message) > 100 or "이력서" in message or "자기소개서" in message:
                 state["user_text"] = message
-                state["shown"] = set() # 텍스트 직접 입력 시에도 기존 추천 이력 초기화
-                user_states[user_id] = state # 상태 업데이트
+                state["shown"] = set()
+                user_states[user_id] = state
                 return jsonify({"reply": "이력서/자기소개서 내용을 확인했습니다. 아래 항목 중에서 관심 분야를 선택해주세요:\n1. IT  2. 제조  3. 서비스  4. 마케팅  5. 상관 없음"})
             else:
-                # 자기소개서/이력서가 없는 경우 일반 상담 모드 메시지
-                return jsonify({"reply": "개인별 맞춤 분석을 위해서는 자기소개서 혹은 이력서가 필요합니다. 파일을 첨부해 주시거나 내용을 직접 입력해 주시면 상세한 분석을 제공해 드리겠습니다."})
+                return jsonify({"reply": "자기소개서나 이력서를 먼저 입력해 주세요."})
 
-        # 3. 자기소개서/이력서가 입력되었고, 사용자 선호도 정보가 없는 경우
-        if not state.get("user_text"):
-            return jsonify({"reply": "아직 자기소개서나 이력서 내용이 입력되지 않았습니다. 먼저 이력서를 업로드하거나 자소서를 입력해 주세요."})
-        
-        if state["user_text"] and state["interest"] is None:
+        # 3. 관심 분야 입력 단계
+        if state["interest"] is None:
             option_map = {
-                "1": "IT",
-                "2": "제조",
-                "3": "서비스",
-                "4": "마케팅",
-                "5": ""  # 상관 없음
+                "1": "IT", "2": "제조", "3": "서비스", "4": "마케팅", "5": ""
             }
-            stripped_msg = message.strip()
-            selected = option_map.get(stripped_msg)
-        
-            # 숫자 선택
+            selected = option_map.get(message)
             if selected is not None:
-                display = selected if selected else "상관 없음"
                 state["interest"] = selected
                 user_states[user_id] = state
-                return jsonify({"reply": f"📌 관심 분야로 '{display}'이(가) 선택되었습니다.\n다음으로 희망 근무지를 선택해주세요:\n1. 서울  2. 경기  3. 인천  4. 부산  5. 상관 없음"})
-
-    # 자유 텍스트 입력
-    elif stripped_msg:
-        state["interest"] = stripped_msg
-        user_states[user_id] = state
-        return jsonify({"reply": f"📌 '{stripped_msg}'을 관심 분야로 설정했습니다.\n다음으로 희망 근무지를 선택해주세요:\n1. 서울  2. 경기  3. 인천  4. 부산  5. 상관 없음"})
-
-    # 아무 것도 안 입력했을 경우
-    else:
-        return jsonify({"reply": "관심 분야를 숫자(1~5)로 선택하거나, 직접 입력해주세요:\n1. IT  2. 제조  3. 서비스  4. 마케팅  5. 상관 없음"})
-
-        # 희망 근무지 단계
-        if state["user_text"] and state["interest"] is not None and state["region"] is None:
-            option_map = {
-                "1": "서울",
-                "2": "경기",
-                "3": "인천",
-                "4": "부산",
-                "5": ""  # 상관 없음
-            }
-            stripped_msg = message.strip()
-            selected = option_map.get(stripped_msg)
-        
-            if selected is not None:
                 display = selected if selected else "상관 없음"
+                return jsonify({"reply": f"📌 관심 분야로 '{display}'이(가) 선택되었습니다.\n다음으로 희망 근무지를 선택해주세요:\n1. 서울  2. 경기  3. 인천  4. 부산  5. 상관 없음"})
+            else:
+                # 자유 텍스트 입력
+                state["interest"] = message
+                user_states[user_id] = state
+                return jsonify({"reply": f"📌 '{message}'을 관심 분야로 설정했습니다.\n다음으로 희망 근무지를 선택해주세요:\n1. 서울  2. 경기  3. 인천  4. 부산  5. 상관 없음"})
+
+        # 4. 희망 근무지 입력 단계
+        if state["region"] is None:
+            option_map = {
+                "1": "서울", "2": "경기", "3": "인천", "4": "부산", "5": ""
+            }
+            selected = option_map.get(message)
+            if selected is not None:
                 state["region"] = selected
                 user_states[user_id] = state
+                display = selected if selected else "상관 없음"
                 return jsonify({"reply": f"📌 희망 근무지로 '{display}'이(가) 선택되었습니다.\n다음으로 희망 연봉을 선택해주세요:\n1. 3000~3500만원  2. 3500~4000만원  3. 4000만원 이상  4. 연봉 무관"})
-        
-            elif stripped_msg:
-                state["region"] = stripped_msg
-                user_states[user_id] = state
-                return jsonify({"reply": f"📌 '{stripped_msg}'을 희망 근무지로 설정했습니다.\n다음으로 희망 연봉을 선택해주세요:\n1. 3000~3500만원  2. 3500~4000만원  3. 4000만원 이상  4. 연봉 무관"})
-        
             else:
-                return jsonify({"reply": "희망 근무지를 숫자(1~5)로 선택하거나, 직접 입력해주세요:\n1. 서울  2. 경기  3. 인천  4. 부산  5. 상관 없음"})
+                # 자유 텍스트 입력
+                state["region"] = message
+                user_states[user_id] = state
+                return jsonify({"reply": f"📌 '{message}'을 희망 근무지로 설정했습니다.\n다음으로 희망 연봉을 선택해주세요:\n1. 3000~3500만원  2. 3500~4000만원  3. 4000만원 이상  4. 연봉 무관"})
 
-        # 희망 연봉 단계
-        if state["user_text"] and state["region"] is not None and state["salary"] is None:
+        # 5. 희망 연봉 입력 단계
+        if state["salary"] is None:
             option_map = {
-                "1": "3000",
-                "2": "3500",
-                "3": "4000",
-                "4": ""  # 연봉 무관
+                "1": "3000", "2": "3500", "3": "4000", "4": ""
             }
-            selected = option_map.get(message.strip())
-            stripped_msg = message.strip()
-            selected = option_map.get(stripped_msg)
-        
+            selected = option_map.get(message)
             if selected is not None:
                 state["salary"] = selected
-                user_states[user_id] = state
-                salary_display_map = {
-                    "3000": "3000~3500만원",
-                    "3500": "3500~4000만원",
-                    "4000": "4000만원 이상",
-                    "": "연봉 무관"
-                }
-                display = salary_display_map.get(selected, "연봉 무관")
-        
-                # ✅ 선택 요약 메시지
-                interest_text = state["interest"] or "상관 없음"
-                region_text = state["region"] or "상관 없음"
-        
-                summary_msg = (
-                    f"📌 선택하신 조건은 다음과 같습니다:\n"
-                    f"- 관심 분야: {interest_text}\n"
-                    f"- 희망 근무지: {region_text}\n"
-                    f"- 희망 연봉: {display}\n\n"
-                    f"이 조건과 자기소개서를 바탕으로 추천 기업을 분석해드릴게요!\n\n"
-                )
-        
-            elif stripped_msg:
-                # 자유 텍스트 입력
-                state["salary"] = stripped_msg
-                user_states[user_id] = state
-        
-                interest_text = state["interest"] or "상관 없음"
-                region_text = state["region"] or "상관 없음"
-                
             else:
-                return jsonify({"reply": "희망 연봉을 숫자(1~4)로 선택하거나 직접 입력해 주세요:\n1. 3000~3500만원  2. 3500~4000만원  3. 4000만원 이상  4. 연봉 무관"})
-        
-            # 추천 수행
+                state["salary"] = message
+            user_states[user_id] = state
+
+            interest_text = state["interest"] or "상관 없음"
+            region_text = state["region"] or "상관 없음"
+            salary_display_map = {
+                "3000": "3000~3500만원",
+                "3500": "3500~4000만원",
+                "4000": "4000만원 이상",
+                "": "연봉 무관"
+            }
+            display = salary_display_map.get(state["salary"], state["salary"])
+
+            summary_msg = (
+                f"📌 선택하신 조건은 다음과 같습니다:\n"
+                f"- 관심 분야: {interest_text}\n"
+                f"- 희망 근무지: {region_text}\n"
+                f"- 희망 연봉: {display}\n\n"
+                f"이 조건과 자기소개서를 바탕으로 추천 기업을 분석해드릴게요!\n\n"
+            )
+
+            # 추천 생성
             new_recommendations = make_recommendations(
                 user_text=state["user_text"],
                 interest=state.get("interest"),
@@ -520,73 +473,31 @@ def chat():
                 shown_companies_set=state["shown"],
                 top_n=2
             )
-        
+
             if not new_recommendations:
                 return jsonify({"reply": summary_msg + "현재 조건에 맞는 기업을 찾을 수 없습니다."})
-        
+
             explanations = []
             for company, score in new_recommendations:
                 company_info_for_gpt = {
                     "회사명": company.get("회사명", company.get("name", "정보 없음")),
                     "채용공고명": company.get("채용공고명", company.get("summary", "정보 없음")),
                     "지역": company.get("지역", company.get("region", "")),
-                    "산업": company.get("산업", company.get("industry", "")),
+                    "산업": company.get("산업", company.get("industry", ""))
                 }
                 reason = generate_reason_individual(state["user_text"], company_info_for_gpt, score)
                 explanations.append(
                     f"**기업명**: {company_info_for_gpt['회사명']}\n"
                     f"**채용공고명**: {company_info_for_gpt['채용공고명']}\n"
-                    f"**종합 점수**: {round(score,2)}\n"
+                    f"**종합 점수**: {round(score, 2)}\n"
                     f"**설명**: {reason}\n"
                 )
-        
+
             reply = summary_msg + "\n\n".join(explanations)
             reply += "\n\n📌 '더 추천해줘'라고 입력하시면 추가 기업을 추천해드릴게요."
             return jsonify({"reply": reply})
-            
-                summary_msg = (
-                    f"📌 선택하신 조건은 다음과 같습니다:\n"
-                    f"- 관심 분야: {interest_text}\n"
-                    f"- 희망 근무지: {region_text}\n"
-                    f"- 희망 연봉: {salary_text}\n\n"
-                    f"이 조건과 자기소개서를 바탕으로 추천 기업을 분석해드릴게요!\n\n"
-                )
-            
-                # 추천 수행
-                new_recommendations = make_recommendations(
-                    user_text=state["user_text"],
-                    interest=state.get("interest"),
-                    region=state.get("region"),
-                    salary=state.get("salary"),
-                    shown_companies_set=state["shown"],
-                    top_n=2  # 추천 2개
-                )
-            
-                if not new_recommendations:
-                    return jsonify({"reply": summary_msg + "현재 조건에 맞는 기업을 찾을 수 없습니다."})
-            
-                explanations = []
-                for company, score in new_recommendations:
-                    company_info_for_gpt = {
-                        "회사명": company.get("회사명", company.get("name", "정보 없음")),
-                        "채용공고명": company.get("채용공고명", company.get("summary", "정보 없음")),
-                        "지역": company.get("지역", company.get("region", "")),
-                        "산업": company.get("산업", company.get("industry", "")),
-                    }
-                    reason = generate_reason_individual(state["user_text"], company_info_for_gpt, score)
-                    explanations.append(
-                        f"**기업명**: {company_info_for_gpt['회사명']}\n"
-                        f"**채용공고명**: {company_info_for_gpt['채용공고명']}\n"
-                        f"**종합 점수**: {round(score,2)}\n"
-                        f"**설명**: {reason}\n"
-                    )
-            
-                reply = summary_msg + "\n\n".join(explanations)
 
-            reply += "\n\n📌 더 궁금한 점이나 고려하고 싶은 조건이 있다면 말씀해 주세요. 추가로 반영해 드릴게요! 또는 '추천 초기화'라고 말씀하시면 처음부터 다시 시작할 수 있습니다."
-            return jsonify({"reply": reply})
-
-        # 5. "추천 초기화" 요청 처리
+        # 6. 추천 초기화
         if "추천 초기화" in message:
             user_states[user_id] = {
                 "shown": set(),
@@ -595,15 +506,15 @@ def chat():
                 "region": None,
                 "salary": None
             }
-            return jsonify({"reply": "추천 상태가 초기화되었습니다. 새로운 자기소개서/이력서 파일을 첨부하시거나 내용을 직접 입력해 주세요."})
+            return jsonify({"reply": "추천 상태가 초기화되었습니다. 새로운 자기소개서/이력서를 업로드하거나 입력해 주세요."})
 
-        # 기타 일반 메시지 처리
-        return jsonify({"reply": "무슨 말씀이신지 정확히 이해하지 못했습니다. 자기소개서/이력서를 첨부해 주시거나, '추천 초기화'를 통해 다시 시작할 수 있습니다."})
+        # 7. 기타
+        return jsonify({"reply": "무슨 말씀이신지 이해하지 못했습니다. '추천 초기화'로 처음부터 다시 시작할 수 있어요."})
 
     except Exception as e:
         print(f"❌ 서버 에러: {e}")
-        traceback.print_exc() # 서버 전체 오류 스택 트레이스 출력
-        return jsonify({"reply": f"❌ 오류가 발생했습니다: {str(e)} 불편을 드려 죄송합니다. 잠시 후 다시 시도해 주세요."}), 500
+        traceback.print_exc()
+        return jsonify({"reply": f"❌ 오류가 발생했습니다: {str(e)}"}), 500
         
 @app.route("/health", methods=["GET"])
 def health_check():
