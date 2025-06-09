@@ -456,20 +456,38 @@ def chat():
             if selected is not None:
                 state["salary"] = selected
                 user_states[user_id] = state
-
-                # 모든 선호도 정보 입력 완료 → 추천 수행
+            
+                # 📌 선택 요약 메시지
+                interest_text = state["interest"] or "상관 없음"
+                region_text = state["region"] or "상관 없음"
+                salary_text = {
+                    "3000": "3000~3500만원",
+                    "3500": "3500~4000만원",
+                    "4000": "4000만원 이상",
+                    "": "연봉 무관"
+                }.get(state["salary"], "연봉 무관")
+            
+                summary_msg = (
+                    f"📌 선택하신 조건은 다음과 같습니다:\n"
+                    f"- 관심 분야: {interest_text}\n"
+                    f"- 희망 근무지: {region_text}\n"
+                    f"- 희망 연봉: {salary_text}\n\n"
+                    f"이 조건과 자기소개서를 바탕으로 추천 기업을 분석해드릴게요!\n\n"
+                )
+            
+                # 추천 수행
                 new_recommendations = make_recommendations(
                     user_text=state["user_text"],
                     interest=state.get("interest"),
                     region=state.get("region"),
                     salary=state.get("salary"),
                     shown_companies_set=state["shown"],
-                    top_n=2  # 첫 추천은 2개
+                    top_n=2  # 추천 2개
                 )
-
+            
                 if not new_recommendations:
-                    return jsonify({"reply": "현재 조건에 맞는 기업을 찾을 수 없습니다. 다른 조건을 입력하거나 '추천 초기화'를 입력해 주세요."})
-
+                    return jsonify({"reply": summary_msg + "현재 조건에 맞는 기업을 찾을 수 없습니다."})
+            
                 explanations = []
                 for company, score in new_recommendations:
                     company_info_for_gpt = {
@@ -485,44 +503,9 @@ def chat():
                         f"**종합 점수**: {round(score,2)}\n"
                         f"**설명**: {reason}\n"
                     )
+            
+                reply = summary_msg + "\n\n".join(explanations)
 
-                reply = "\n\n".join(explanations)
-                reply += "\n\n📌 '더 추천해줘'라고 입력하시면 다른 기업도 추천해드릴 수 있어요."
-                return jsonify({"reply": reply})
-            else:
-                return jsonify({"reply": "희망 연봉을 숫자로 선택해주세요:\n1. 3000~3500만원  2. 3500~4000만원  3. 4000만원 이상  4. 연봉 무관"})
-
-        # 4. "더 추천해줘" 요청 처리
-        if state["user_text"] is not None and state["interest"] is not None and "더 추천해줘" in message:
-            new_recommendations = make_recommendations(
-                user_text=state["user_text"],
-                interest=state.get("interest"),
-                region=state.get("region"),
-                salary=state.get("salary"),
-                shown_companies_set=state["shown"],
-                top_n=1  # 추가 추천은 1개씩
-            )
-
-            if not new_recommendations:
-                return jsonify({"reply": "더 이상 추천할 기업이 없습니다. 다른 조건을 말씀해주시거나 '추천 초기화'를 통해 다시 시작해 주시겠어요?"})
-
-            explanations = []
-            for company, score in new_recommendations:
-                company_info_for_gpt = {
-                    "회사명": company.get("회사명", company.get("name", "정보 없음")),
-                    "채용공고명": company.get("채용공고명", company.get("summary", "정보 없음")),
-                    "지역": company.get("지역", company.get("region", "")),
-                    "산업": company.get("산업", company.get("industry", "")),
-                }
-                reason = generate_reason_individual(state["user_text"], company_info_for_gpt, score)
-                explanations.append(
-                    f"**기업명**: {company_info_for_gpt['회사명']}\n"
-                    f"**채용공고명**: {company_info_for_gpt['채용공고명']}\n"
-                    f"**종합 점수**: {round(score,2)}\n"
-                    f"**설명**: {reason}\n"
-                )
-
-            reply = "\n\n".join(explanations)
             reply += "\n\n📌 더 궁금한 점이나 고려하고 싶은 조건이 있다면 말씀해 주세요. 추가로 반영해 드릴게요! 또는 '추천 초기화'라고 말씀하시면 처음부터 다시 시작할 수 있습니다."
             return jsonify({"reply": reply})
 
