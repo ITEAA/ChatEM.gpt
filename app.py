@@ -404,13 +404,15 @@ def chat():
                 return jsonify({"reply": "개인별 맞춤 분석을 위해서는 자기소개서 혹은 이력서가 필요합니다. 파일을 첨부해 주시거나 내용을 직접 입력해 주시면 상세한 분석을 제공해 드리겠습니다."})
 
         # 3. 자기소개서/이력서가 입력되었고, 사용자 선호도 정보가 없는 경우
-        if state["user_text"] is not None and state["interest"] is None:
-            if "," in message:
-                parts = [p.strip() for p in message.split(",")]
-                state["interest"] = parts[0] if len(parts) > 0 and parts[0].lower() != "없음" else ""
-                state["region"] = parts[1] if len(parts) > 1 and parts[1].lower() != "없음" else ""
-                state["salary"] = parts[2].replace("만원", "") if len(parts) > 2 and parts[2].lower() != "없음" else ""
-                user_states[user_id] = state # 상태 업데이트
+        if not state.get("user_text"):
+            return jsonify({"reply": "아직 자기소개서나 이력서 내용이 입력되지 않았습니다. 먼저 이력서를 업로드하거나 자소서를 입력해 주세요."})
+        
+        if state["interest"] is None and "," in message:
+            parts = [p.strip() for p in message.split(",")]
+            state["interest"] = parts[0] if len(parts) > 0 and parts[0].lower() != "없음" else ""
+            state["region"] = parts[1] if len(parts) > 1 and parts[1].lower() != "없음" else ""
+            state["salary"] = parts[2].replace("만원", "") if len(parts) > 2 and parts[2].lower() != "없음" else ""
+            user_states[user_id] = state
 
                 # 선호도 입력 후 첫 추천 시작
                 new_recommendations = make_recommendations(
