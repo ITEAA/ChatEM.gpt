@@ -40,12 +40,14 @@ company_tfidf_matrix = None
 # --- KoBERT 임베딩 생성 함수 (단일 함수로 통합) ---
 def get_kobert_embedding(text_input):
     if model is None or tokenizer is None or device is None or not text_input:
+        # 모델이 로드되지 않았거나 입력 텍스트가 없을 경우 0 벡터 반환
         return torch.zeros(768).to(device) # KoBERT 기본 hidden_size
     try:
         inputs = tokenizer(text_input, return_tensors="pt", truncation=True, padding=True, max_length=512)
         inputs = {k: v.to(device) for k, v in inputs.items()}
         with torch.no_grad():
             outputs = model(**inputs)
+        # 평균 풀링을 통해 문장 임베딩 생성
         embedding = torch.mean(outputs.last_hidden_state, dim=1).squeeze()
         return embedding
     except Exception as e:
@@ -66,12 +68,13 @@ try:
     model = AutoModel.from_pretrained("monologg/kobert")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
-    model.eval()
+    model.eval() # 모델을 평가 모드로 설정
     print("✅ KoBERT 모델 로드 성공!")
 
     # --- 서버 시작 시 모든 기업 정보에 대한 KoBERT 임베딩 미리 계산 ---
     print("서버 시작 전, 기업 정보 KoBERT 임베딩을 시작합니다... (데이터 양에 따라 몇 분 소요될 수 있습니다)")
     for company in cached_companies:
+        # '채용공고명'과 '회사명'을 조합하여 임베딩 생성
         summary_text = f"{company.get('채용공고명', '')} {company.get('회사명', '')}"
         company['embedding'] = get_kobert_embedding(summary_text) # 통합된 함수 사용
     print("✅ 모든 기업 정보의 KoBERT 임베딩이 완료되어 메모리에 저장되었습니다.")
@@ -87,7 +90,7 @@ try:
 
 except json.JSONDecodeError as e:
     print(f"❌ 오류: '{GG_CACHED_FILE}' 파일이 유효한 JSON 형식이 아닙니다. 오류: {e}")
-    cached_companies = []
+    cached_companies = [] # 오류 발생 시 빈 목록으로 초기화
     raise RuntimeError(f"기업 정보 파일 로딩에 실패했습니다. 오류: {e}")
 except Exception as e:
     print(f"❌ 초기 설정 중 치명적인 오류 발생: {e}")
@@ -104,21 +107,24 @@ def extract_text_from_pdf(pdf_file_stream):
             text_content.append(page.get_text())
         raw_text = "\n".join(text_content)
 
-        processed_text = re.sub(r'\s+', ' ', raw_text).strip()
+        # 텍스트 전처리 강화: 여러 개의 공백(줄바꿈, 탭 포함)을 하나의 공백으로 치환
+        processed_text = re.sub(r'\s+', ' ', raw_text)
+        # 앞뒤 공백 제거
+        processed_text = processed_text.strip()
 
-        # 디버깅 출력은 그대로 유지
-        print("\n--- PDF에서 추출된 원본 텍스트 (앞부분 500자) ---")
-        print(raw_text[:500])
-        print("-------------------------------------------\n")
-        print("--- PDF에서 추출 및 전처리된 텍스트 (앞부분 500자) ---")
-        print(processed_text[:500])
-        print("---------------------------------------------------\n")
+        # 디버깅을 위해 추출된 텍스트를 출력 (개발 중 유용)
+        # print("\n--- PDF에서 추출된 원본 텍스트 (앞부분 500자) ---")
+        # print(raw_text[:500])
+        # print("-------------------------------------------\n")
+        # print("--- PDF에서 추출 및 전처리된 텍스트 (앞부분 500자) ---")
+        # print(processed_text[:500])
+        # print("---------------------------------------------------\n")
 
         return processed_text
     except Exception as e:
         print(f"❌ PDF 텍스트 추출 오류: {e}")
         traceback.print_exc()
-        return ""
+        return "" # 오류 발생 시 빈 문자열 반환
 
 
 # --- GPT를 사용하여 키워드 추출 함수 ---
@@ -147,7 +153,6 @@ def extract_keywords(text):
         traceback.print_exc()
         return []
 
-
 # --- KoBERT 유사도 계산 함수 ---
 def kobert_similarity(user_text, companies):
     if not user_text or not companies:
@@ -157,7 +162,8 @@ def kobert_similarity(user_text, companies):
 
     results = []
     for c in companies:
-        company_embedding = c.get('embedding')
+        company_embedding = c.get('embedding') # 미리 계산된 임베딩 사용
+        # 임베딩이 없거나 모두 0인 경우는 제외 (초기 로딩 오류 등으로 인해 발생 가능)
         if company_embedding is not None and not torch.all(company_embedding == 0):
             company_embedding_np = company_embedding.cpu().numpy().reshape(1, -1)
             score = cosine_similarity(user_embedding_np, company_embedding_np)[0][0]
@@ -211,54 +217,71 @@ def generate_reason_individual(user_text, company, score):
 
 # --- 연봉 정보 파싱 헬퍼 함수 ---
 def parse_salary_info(summary_text):
+    """
+    summary 텍스트에서 연봉 정보를 파싱하여 (최소 연봉, 최대 연봉) 튜플을 만원 단위로 반환.
+    정보가 없으면 (0, float('inf')) 반환.
+    """
     min_salary = 0
     max_salary = float('inf')
 
+    # 연봉 패턴: "연봉 3000만원 ~ 4000만원", "연봉 5000만원"
     match_annual = re.search(r'연봉 (\d+)(?:만원)?(?: ~ (\d+)(?:만원)?)?', summary_text)
     if match_annual:
         min_salary = int(match_annual.group(1))
         max_salary = int(match_annual.group(2)) if match_annual.group(2) else min_salary
         return min_salary, max_salary
 
+    # 월급 패턴: "월급 220만원 ~ 240만원", "월급 116만원"
     match_monthly = re.search(r'월급 (\d+)(?:만원)?(?: ~ (\d+)(?:만원)?)?', summary_text)
     if match_monthly:
         min_monthly = int(match_monthly.group(1))
-        min_salary = min_monthly * 12
+        min_salary = min_monthly * 12 # 연봉으로 환산
         max_monthly = int(match_monthly.group(2)) if match_monthly.group(2) else min_monthly
-        max_salary = max_monthly * 12
+        max_salary = max_monthly * 12 # 연봉으로 환산
         return min_salary, max_salary
 
+    # 시급 패턴: "시급 12500원", "시급 9860원" (월 209시간 근무 기준, 만원 단위로 변환)
     match_hourly = re.search(r'시급 (\d+)', summary_text)
     if match_hourly:
         hourly_wage = int(match_hourly.group(1))
-        min_salary = (hourly_wage * 209 * 12) / 10000
-        max_salary = min_salary
-        return int(min_salary), int(max_salary)
-
-    return 0, float('inf')
+        # 한국 노동법 기준 주 40시간, 월 209시간 (40시간 * 52주 / 12개월 = 173.3시간, 일반적으로 209시간 적용)
+        min_salary = (hourly_wage * 209 * 12) / 10000 # 원 -> 만원
+        max_salary = min_salary # 시급은 보통 단일
+        return int(min_salary), int(max_salary) # 정수형으로 반환
+        
+    return 0, float('inf') # 연봉 정보가 없으면 필터링하지 않음
 
 # --- 기업 필터링 로직 함수 ---
 def apply_company_filters(company, interest, region, salary):
     passes_filter = True
-
+        
+    # '관심' 키워드가 summary 또는 industry에 포함되는지 확인 (대소문자 무시)
     if interest:
         summary_lower = company.get('summary', '').lower()
         industry_lower = company.get('industry', '').lower()
         interest_lower = interest.lower()
         if interest_lower not in summary_lower and interest_lower not in industry_lower:
             passes_filter = False
-
+            
+    # '지역' 키워드가 region에 포함되는지 확인 (대소문자 무시)
     if region and region.lower() not in company.get("region", "").lower():
         passes_filter = False
-
+            
+    # --- 연봉 필터링 로직 ---
     if salary:
         try:
-            min_salary_req = int(salary)
+            min_salary_req = int(salary) # 사용자 희망 최소 연봉 (만원 단위)
+                
+            # 기업의 연봉 정보 파싱
             company_min_salary, company_max_salary = parse_salary_info(company.get("summary", ""))
+
+            # 사용자의 희망 최소 연봉이 기업의 최대 연봉보다 높으면 필터링
             if min_salary_req > company_max_salary:
                 passes_filter = False
+                
         except ValueError:
-            pass # 유효하지 않은 연봉 입력 또는 파싱 오류는 무시
+            print(f"경고: 유효하지 않은 연봉 입력 '{salary}' 또는 기업 연봉 정보 파싱 오류")
+            pass # 유효하지 않은 연봉 입력 또는 파싱 오류는 무시하고 필터링하지 않음
 
     return passes_filter
 
@@ -270,47 +293,66 @@ def make_recommendations(user_text, interest, region, salary, shown_companies_se
     if not user_text or not cached_companies:
         return []
 
+    # 1. KoBERT 기반 유사도 계산 (모든 캐싱된 기업 대상)
     kobert_ranked_companies = kobert_similarity(user_text, cached_companies)
-    tfidf_ranked_companies = tfidf_similarity(user_text, cached_companies)
 
+    # 2. TF-IDF 기반 유사도 계산 (모든 캐싱된 기업 대상)
+    tfidf_ranked_companies = tfidf_similarity(user_text, cached_companies)
+        
+    # 3. 점수 합산을 위해 회사 정보를 key로 하는 딕셔너리 생성
     tfidf_scores = {
-        (c.get("name"), c.get("summary")): score
+        (c.get("name"), c.get("summary")): score # 'summary' 필드를 키로 사용
         for c, score in tfidf_ranked_companies
     }
 
+    # 4. Hybrid 점수 계산 (KoBERT 점수 + TF-IDF 점수) 및 필터링 적용
     hybrid_scores = []
     for company, kobert_score in kobert_ranked_companies:
+        # TF-IDF 점수를 가져올 때도 'summary' 필드를 사용
         company_key = (company.get("name"), company.get("summary"))
         tfidf_score = tfidf_scores.get(company_key, 0.0)
 
+        # 가중치 설정 (KoBERT: 70%, TF-IDF: 30%) - 이 값은 조정 가능
         kobert_weight = 0.7
         tfidf_weight = 0.3
+            
+        # 코사인 유사도는 이미 0~1 사이의 값이므로 별도 정규화 없이 가중치 적용
         final_score = (kobert_weight * kobert_score) + (tfidf_weight * tfidf_score)
-
+            
+        # 추가 필터링 (관심분야, 지역, 연봉)
         if apply_company_filters(company, interest, region, salary):
             hybrid_scores.append((company, final_score))
 
+    # 최종 점수를 기준으로 내림차순 정렬
     hybrid_scores.sort(key=lambda x: x[1], reverse=True)
-
+        
+    # 이미 보여준 공고 제외하고 상위 N개 선택
     results = []
     for comp, sim in hybrid_scores:
+        # 튜플로 저장된 회사 ID를 문자열로 변환하여 집합에 추가 (회사명과 summary를 유일한 ID로 사용)
         comp_id_str = json.dumps((comp.get("name"), comp.get("summary")), ensure_ascii=False)
         if comp_id_str not in shown_companies_set:
-            shown_companies_set.add(comp_id_str)
+            shown_companies_set.add(comp_id_str) # 이미 보여준 회사 목록에 추가
             results.append((comp, sim))
         if len(results) >= top_n:
             break
-
+            
     return results
+
+
+# --- Flask 라우트 설정 ---
+@app.route("/")
+def index():
+    return render_template("index.html")
 
 # --- 사용자 상태 관리 헬퍼 함수 ---
 def _get_user_state(user_id):
     return user_states.get(user_id, {
-        "shown": set(),
-        "user_text": None,
-        "interest": None,
-        "region": None,
-        "salary": None
+        "shown": set(), # 이미 추천된 기업 목록 (중복 추천 방지)
+        "user_text": None, # 사용자의 자기소개서/이력서 텍스트
+        "interest": None, # 사용자 관심 분야
+        "region": None, # 사용자 희망 근무지
+        "salary": None # 사용자 희망 연봉
     })
 
 def _update_user_state(user_id, state):
@@ -319,24 +361,25 @@ def _update_user_state(user_id, state):
 # --- 추천 결과 응답 생성 헬퍼 함수 (중복 로직 제거) ---
 def _generate_recommendation_response(user_text, recommendations, additional_message=""):
     if not recommendations:
-        return "아쉽게도 현재 조건에 맞는 기업을 찾을 수 없습니다. 다른 조건을 말씀해주시거나 '추천 초기화'를 통해 다시 시작해 주시겠어요?"
+        return {"reply": "아쉽게도 현재 조건에 맞는 기업을 찾을 수 없습니다. 다른 조건을 말씀해주시거나 '추천 초기화'를 통해 다시 시작해 주시겠어요?"}
 
     explanations = []
     for company, score in recommendations:
-        company_info_for_gpt = {k: v for k, v in company.items() if k not in ['embedding', 'summary']}
+        # 임베딩 정보는 클라이언트에게 보낼 필요 없으므로 제거
+        company_info_for_gpt = {k: v for k, v in company.items() if k not in ['embedding', 'summary']} # summary도 제외
         reason = generate_reason_individual(user_text, company_info_for_gpt, score)
-        explanations.append(f"**기업명**: {company_info_for_gpt.get('name', '정보 없음')}\n**채용공고명**: {company_info_for_gpt.get('summary', '정보 없음')}\n**종합 점수**: {round(score,2)}\n**설명**: {reason}\n")
+        explanations.append(f"**기업명**: {company_info_for_gpt.get('name', '정보 없음')}\n**채용공고명**: {company.get('summary', '정보 없음')}\n**종합 점수**: {round(score,2)}\n**설명**: {reason}\n") # summary를 다시 보여주기
     
     reply = "\n\n".join(explanations)
     reply += f"\n\n📌 {additional_message if additional_message else '더 궁금한 점이나 고려하고 싶은 조건이 있다면 말씀해 주세요. 추가로 반영해 드릴게요!'}"
-    return reply
+    return {"reply": reply}
 
 # --- Chat 라우트 핸들러 헬퍼 함수들 ---
 def _handle_pdf_upload(file_stream, user_id, state):
     user_text = extract_text_from_pdf(file_stream)
     if user_text:
         state["user_text"] = user_text
-        state["shown"] = set() # 파일 업로드 시 초기화
+        state["shown"] = set() # 파일 업로드 시에는 기존 추천 이력을 초기화
         _update_user_state(user_id, state)
         return {"reply": "감사합니다. 이력서/자기소개서 내용이 성공적으로 분석되었습니다. 이제 **관심 분야, 희망 근무지, 연봉**을 '품질, 서울, 3000만원' 또는 '없음, 없음, 없음'과 같이 입력해 주세요."}
     else:
@@ -344,7 +387,7 @@ def _handle_pdf_upload(file_stream, user_id, state):
 
 def _handle_initial_text_input(message, user_id, state):
     state["user_text"] = message
-    state["shown"] = set() # 텍스트 직접 입력 시 초기화
+    state["shown"] = set() # 텍스트 직접 입력 시에도 기존 추천 이력 초기화
     _update_user_state(user_id, state)
     return {"reply": "이력서/자기소개서 내용을 확인했습니다. 이제 **관심 분야, 희망 근무지, 연봉**을 '품질, 서울, 3000만원' 또는 '없음, 없음, 없음'과 같이 입력해 주세요."}
 
@@ -362,13 +405,13 @@ def _handle_preference_input(message, user_id, state):
             region=state.get("region"),
             salary=state.get("salary"),
             shown_companies_set=state["shown"],
-            top_n=3
+            top_n=3 # 첫 추천은 3개
         )
-        return {"reply": _generate_recommendation_response(
+        return _generate_recommendation_response(
             state["user_text"],
             new_recommendations,
             "더 궁금한 점이나 고려하고 싶은 조건이 있다면 말씀해 주세요. 추가로 반영해 드릴게요! 예를 들어 '더 추천해줘'라고 말씀하시면 다른 기업을 찾아드릴 수 있습니다."
-        )}
+        )
     else:
         return {"reply": "관심 분야, 희망 근무지, 연봉을 '품질, 서울, 3000만원' 또는 '없음, 없음, 없음'과 같이 콤마(,)로 구분해서 입력해 주세요."}
 
@@ -379,48 +422,66 @@ def _handle_more_recommendations(user_id, state):
         region=state.get("region"),
         salary=state.get("salary"),
         shown_companies_set=state["shown"],
-        top_n=1
+        top_n=1 # 추가 추천은 1개씩
     )
-    return {"reply": _generate_recommendation_response(
+    return _generate_recommendation_response(
         state["user_text"],
         new_recommendations,
         "더 궁금한 점이나 고려하고 싶은 조건이 있다면 말씀해 주세요. 추가로 반영해 드릴게요! 또는 '추천 초기화'라고 말씀하시면 처음부터 다시 시작할 수 있습니다."
-    )}
+    )
 
 def _handle_reset(user_id):
     user_states.pop(user_id, None)
     return {"reply": "추천 상태가 초기화되었습니다. 새로운 자기소개서/이력서 파일을 첨부하시거나 내용을 직접 입력해 주세요."}
 
-# --- Flask 라우트 설정 ---
-@app.route("/")
-def index():
-    return render_template("index.html")
 
+# --- Flask 라우트 설정 ---
 @app.route("/chat", methods=["POST"])
 def chat():
+    # 사용자 ID가 세션에 없으면 새로 생성
     if 'user_id' not in session:
         session['user_id'] = str(uuid.uuid4())
     user_id = session['user_id']
+    
+    # user_states 딕셔너리에서 현재 사용자 상태 로드.
     state = _get_user_state(user_id)
 
     message = request.form.get("message", "").strip()
     file = request.files.get("file")
 
     try:
-        # 1. 파일 첨부 처리
+        # 1. "추천 초기화" 요청 처리 (어떤 상태에서든 우선 처리)
+        if "추천 초기화" in message:
+            return jsonify(_handle_reset(user_id))
+
+        # 2. 파일 첨부 시 자기소개서/이력서 추출
         if file and file.filename != '':
             return jsonify(_handle_pdf_upload(file, user_id, state))
 
-        # 2. 자기소개서/이력서 텍스트 입력 처리 (아직 자기소개서가 없는 경우)
+        # 3. 파일 없이 메시지만 있을 경우: 자기소개서/이력서 입력 여부 확인
         if state["user_text"] is None:
+            # 메시지 길이가 길거나 특정 키워드를 포함하면 자기소개서/이력서로 간주
             if len(message.split()) > 30 or "이력서" in message or "자기소개서" in message:
                 return jsonify(_handle_initial_text_input(message, user_id, state))
             else:
+                # 자기소개서/이력서가 없는 경우 일반 상담 모드 메시지
                 return jsonify({"reply": "개인별 맞춤 분석을 위해서는 자기소개서 혹은 이력서가 필요합니다. 파일을 첨부해 주시거나 내용을 직접 입력해 주시면 상세한 분석을 제공해 드리겠습니다."})
 
-        # 3. 사용자 선호도(관심 분야, 지역, 연봉) 입력 처리 (자기소개서가 있고 선호도가 없는 경우)
+        # 4. 자기소개서/이력서가 입력되었고, 사용자 선호도 정보가 없는 경우
         if state["interest"] is None:
             return jsonify(_handle_preference_input(message, user_id, state))
 
-        # 4. "더 추천해줘" 요청 처리
-        if "더 추천
+        # 5. "더 추천해줘" 요청 처리 (모든 필수 정보가 있는 상태에서)
+        if "더 추천해줘" in message:
+            return jsonify(_handle_more_recommendations(user_id, state))
+            
+        # 6. 기타 일반 메시지 처리 (자기소개서/이력서 및 선호도 입력 후, 위 요청들에 해당하지 않는 경우)
+        return jsonify({"reply": "무슨 말씀이신지 정확히 이해하지 못했습니다. 자기소개서/이력서 정보를 변경하거나 '추천 초기화'를 통해 다시 시작할 수 있습니다."})
+
+    except Exception as e:
+        print(f"❌ 서버 에러: {e}")
+        traceback.print_exc() # 서버 전체 오류 스택 트레이스 출력
+        return jsonify({"reply": f"❌ 오류가 발생했습니다: {str(e)} 불편을 드려 죄송합니다. 잠시 후 다시 시도해 주세요."}), 500
+
+if __name__ == "__main__":
+    app.run(debug=True, host="0.0.0.0", port=8080)
