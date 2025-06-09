@@ -488,8 +488,13 @@ def chat():
 
         # 5. "추천 초기화" 요청 처리
         if "추천 초기화" in message:
-            # user_states에서 해당 사용자 ID의 상태를 완전히 제거
-            user_states.pop(user_id, None)
+            user_states[user_id] = {
+                "shown": set(),
+                "user_text": None,
+                "interest": None,
+                "region": None,
+                "salary": None
+            }
             return jsonify({"reply": "추천 상태가 초기화되었습니다. 새로운 자기소개서/이력서 파일을 첨부하시거나 내용을 직접 입력해 주세요."})
 
         # 기타 일반 메시지 처리
