@@ -4,39 +4,34 @@
     "채용공고명": "품질관리 신입 모집",
     "근무지역": "서울특별시",
     "급여": "3000만원",
-    "채용정보URL": "https://joblink.example.com/gi-tech",
-    "유사도": 0.91
+    "채용정보URL": "https://joblink.example.com/gi-tech"
   },
   {
     "회사명": "에이프로젠",
     "채용공고명": "의약품 품질보증 담당자",
     "근무지역": "서울",
     "급여": "3000만원",
-    "채용정보URL": "https://joblink.example.com/a-progen",
-    "유사도": 0.89
+    "채용정보URL": "https://joblink.example.com/a-progen"
   },
   {
     "회사명": "한국전기연구원",
     "채용공고명": "품질 시험연구원",
     "근무지역": "서울시 성북구",
     "급여": "3000~3200만원",
-    "채용정보URL": "https://joblink.example.com/keri",
-    "유사도": 0.87
+    "채용정보URL": "https://joblink.example.com/keri"
   },
   {
     "회사명": "코스메디",
     "채용공고명": "화장품 QC 및 QA",
     "근무지역": "서울 강남",
     "급여": "연봉 3000만원 이상",
-    "채용정보URL": "https://joblink.example.com/cosmedi",
-    "유사도": 0.86
+    "채용정보URL": "https://joblink.example.com/cosmedi"
   },
   {
     "회사명": "세원전자",
     "채용공고명": "전자부품 품질관리",
     "근무지역": "서울 구로",
     "급여": "연 3000만원",
-    "채용정보URL": "https://joblink.example.com/sewon",
-    "유사도": 0.85
+    "채용정보URL": "https://joblink.example.com/sewon"
   }
 ]
