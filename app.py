@@ -2,9 +2,8 @@ import os
 import json
 import fitz  # PyMuPDF
 import openai
-import random
-import xml.etree.ElementTree as ET
 import requests
+import xml.etree.ElementTree as ET
 import pandas as pd
 
 from flask import Flask, request, jsonify, render_template
@@ -17,13 +16,16 @@ app = Flask(__name__)
 CORS(app)
 
 openai.api_key = os.getenv("OPENAI_API_KEY") or "your-api-key"
-GG_API_KEY = "8af0f404ca144249be0cfab9728b619b"
-GG_API_URL = "https://openapi.gg.go.kr/EmplmntInfoStus"
 
-user_states = {}
-
+# Load top20 companies and cached 경기 채용공고 데이터
 with open("ChatEM_top20_companies.json", "r", encoding="utf-8") as f:
-    company_data = json.load(f)
+    company_data_top20 = json.load(f)
+
+with open("gg_employment_cached.json", "r", encoding="utf-8") as f:
+    company_data_gg = json.load(f)
+
+company_data = company_data_top20 + company_data_gg
+user_states = {}
 
 def extract_text_from_pdf(pdf_file):
     doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
@@ -58,9 +60,9 @@ def filter_companies(keywords, interest, region, salary):
             base_score += 1
         if interest and interest in (company.get("summary") or ""):
             base_score += 0.3
-        if region and region in (company.get("region") or ""):
+        if region and region in (company.get("region") or company.get("근무지역") or ""):
             base_score += 0.3
-        if salary and str(salary) in (company.get("salary") or ""):
+        if salary and str(salary) in (company.get("salary") or company.get("급여") or ""):
             base_score += 0.2
         return base_score
 
@@ -68,7 +70,7 @@ def filter_companies(keywords, interest, region, salary):
 
 def tfidf_similarity(user_text, companies):
     def get_summary(company):
-        return company.get("summary") or f"{company.get('회사명', '')} - {company.get('채용공고명', '')}"
+        return company.get("summary") or company.get("채용공고명") or ""
 
     documents = [user_text] + [get_summary(c) for c in companies]
     tfidf = TfidfVectorizer().fit_transform(documents)
@@ -87,13 +89,13 @@ def generate_reason(user_text, companies_with_scores):
 
     prompt = f"""
 당신은 채용 컨설턴트입니다.
-다음 자기소개서 내용을 바탕으로, 각 기업이 사용자의 경력과 얼마나 잘 맞는지 설명해 주세요.
-다음 형식으로 출력해주세요:
+다음 자기소개서 내용을 바탕으로, 각 기업이 사용자의 경력과 얼마나 잘 맞는지 분석해 주세요.
+출력 형식:
 
 기업명: OOO
 업무: OOO
 유사도 점수: 0.XX
-설명: (분석가의 시선에서 자기소개서의 특정 경험과 직무 연결)
+설명: (분석가 시점에서 자기소개서 경험과 해당 직무의 연결성 분석)
 
 [자기소개서 내용]
 {user_text}
