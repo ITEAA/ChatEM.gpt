@@ -61,15 +61,11 @@
       gap: 10px;
     }
 
-    #userInput, #interestInput, #regionInput, #salaryInput {
+    #userInput {
       padding: 10px;
       font-size: 16px;
       border-radius: 5px;
       border: 1px solid #ccc;
-    }
-
-    #fileInput {
-      border: none;
     }
 
     #sendBtn {
@@ -93,12 +89,11 @@
   <div id="chatContainer">
     <h2>ChatEM</h2>
     <div id="chatBox">
-      <div class="message gpt">안녕하세요! 저는 맞춤 기업 추천 챗봇입니다 😊<br>자기소개서나 이력서를 첨부해주시면 더 정확한 추천이 가능해요!</div>
+      <div class="message gpt">안녕하세요! 자기소개서를 입력하시면 기업을 추천해드릴게요 😊</div>
     </div>
 
     <div id="inputArea">
-      <textarea id="userInput" placeholder="자기소개서 또는 메시지를 입력하세요..." rows="3"></textarea>
-      <input type="file" id="fileInput" />
+      <textarea id="userInput" placeholder="자기소개서를 입력하세요..." rows="4"></textarea>
       <button id="sendBtn" onclick="sendMessage()">보내기</button>
     </div>
   </div>
@@ -106,27 +101,14 @@
   <script>
     const input = document.getElementById("userInput");
     const chatBox = document.getElementById("chatBox");
-    const fileInput = document.getElementById("fileInput");
-    const interestInput = document.getElementById("interestInput");
-    const regionInput = document.getElementById("regionInput");
-    const salaryInput = document.getElementById("salaryInput");
-
-    input.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        sendMessage();
-      }
-    });
 
     async function sendMessage() {
       const message = input.value.trim();
-      const file = fileInput.files[0];
-
-      if (!message && !file) return;
+      if (!message) return;
 
       const userDiv = document.createElement("div");
       userDiv.className = "message user";
-      userDiv.innerText = message || `[이력서/자기소개서 업로드됨: ${file.name}]`;
+      userDiv.innerText = message;
       chatBox.appendChild(userDiv);
 
       const loadingDiv = document.createElement("div");
@@ -136,7 +118,6 @@
 
       const formData = new FormData();
       formData.append("message", message);
-      if (file) formData.append("file", file);
 
       try {
         const response = await fetch("/chat", {
@@ -144,31 +125,23 @@
           body: formData,
         });
 
-        const contentType = response.headers.get("content-type") || "";
-
-        if (!response.ok) {
-          throw new Error(`서버 응답 오류: ${response.status}`);
-        }
-
-        if (contentType.includes("application/json")) {
-          const data = await response.json();
-          loadingDiv.innerText = data.reply;
-        } else {
-          const text = await response.text();
-          loadingDiv.innerText = "❌ 예상치 못한 응답 형식:\n" + text;
-        }
+        const data = await response.json();
+        loadingDiv.innerText = data.reply;
       } catch (err) {
         loadingDiv.innerText = "❌ 오류 발생: " + err.message;
       }
 
       input.value = "";
-      interestInput.value = "";
-      regionInput.value = "";
-      salaryInput.value = "";
-      fileInput.value = null;
       input.focus();
       chatBox.scrollTop = chatBox.scrollHeight;
     }
+
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
   </script>
 </body>
 </html>
