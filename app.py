@@ -1,30 +1,32 @@
 from flask import Flask, request, jsonify, render_template
 import pandas as pd
 import json
-import openai
 import os
+import openai
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+# Flask 앱 생성
 app = Flask(__name__)
 
-# ✅ 환경변수에서 OpenAI API 키 불러오기
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# ✅ OpenAI 클라이언트 초기화
+client = openai.OpenAI()
 
 # ✅ ChatEM 기업 top20 데이터 로드
 with open("ChatEM_top20_companies.json", encoding="utf-8") as f:
     top20_data = json.load(f)
 df_companies = pd.DataFrame(top20_data)
 
-# ✅ GPT 키워드 추출 함수
+# ✅ GPT 키워드 추출 함수 (텍스트 기반)
 def extract_keywords_gpt(text):
     prompt = f"다음 자기소개서에서 핵심 키워드 5개를 뽑아줘:\n{text}"
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.5
     )
-    return response['choices'][0]['message']['content'].strip().split('\n')
+    content = response.choices[0].message.content.strip()
+    return content.split('\n')
 
 # ✅ 기업 추천 함수
 def recommend_companies(user_keywords):
@@ -42,36 +44,42 @@ def recommend_companies(user_keywords):
     top = df_companies.sort_values(by="유사도", ascending=False).head(3)
     return top
 
+# ✅ index.html 렌더링
 @app.route("/")
 def index():
     return render_template("index.html")
 
-@app.route("/chat", methods=["POST"])
-def chat():
-    try:
-        text = request.form.get("message", "")
-        if not text:
-            return jsonify({"reply": "❌ 입력된 자기소개서가 없습니다."})
+# ✅ 추천 결과 JSON 응답
+@app.route("/recommend", methods=["POST"])
+def recommend():
+    user_data = request.json
+    text = user_data.get("text", "")
+    region = user_data.get("region", "")
+    salary = user_data.get("salary", "")
+    interest = user_data.get("interest", "")
 
-        keywords = extract_keywords_gpt(text)
-        results = recommend_companies(keywords)
+    keywords = extract_keywords_gpt(text)
+    if region:
+        keywords.append(region)
+    if salary:
+        keywords.append(salary)
+    if interest:
+        keywords.append(interest)
 
-        output = []
-        for _, row in results.iterrows():
-            desc = f"{row['name']}에서 {row['summary']} 직무를 채용 중이며, 위치는 {row['region']}입니다."
-            output.append({
-                "company": row["name"],
-                "location": row["region"],
-                "industry": row["industry"],
-                "url": row["url"],
-                "score": round(float(row["유사도"]), 2),
-                "description": desc
-            })
-        reply_text = "\n\n".join([r["description"] for r in output])
-        return jsonify({"reply": reply_text})
+    results = recommend_companies(keywords)
 
-    except Exception as e:
-        return jsonify({"reply": f"❌ 서버 오류 발생: {str(e)}"}), 500
+    output = []
+    for _, row in results.iterrows():
+        desc = f"{row['name']}에서 {row['summary']} 직무를 채용 중이며, 위치는 {row['region']}입니다."
+        output.append({
+            "company": row["name"],
+            "location": row["region"],
+            "industry": row["industry"],
+            "url": row["url"],
+            "score": round(float(row["유사도"]), 2),
+            "description": desc
+        })
+    return jsonify(output)
 
 if __name__ == "__main__":
     app.run(debug=True)
