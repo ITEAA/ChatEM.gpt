@@ -50,8 +50,8 @@ try:
         print(f"✅ '{GG_CACHED_FILE}'에서 {len(cached_companies)}개 기업 정보 로드 성공.")
 
     # KoBERT 모델과 토크나이저 로드
-    tokenizer = AutoTokenizer.from_pretrained("monologg/kobert")
-    model = AutoModel.from_pretrained("monologg/kobert")
+    tokenizer = AutoTokenizer.from_pretrained("monologg/kobert", trust_remote_code=True)
+    model = AutoModel.from_pretrained("monologg/kobert", trust_remote_code=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     model.eval()
