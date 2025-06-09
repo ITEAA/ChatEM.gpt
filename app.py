@@ -298,7 +298,7 @@ def parse_salary_info(summary_text):
     return 0, float('inf') # 연봉 정보가 없으면 필터링하지 않음
 
 # --- 기업 추천 로직 함수 (Hybrid 모델) ---
-def make_recommendations(user_text, interest, region, salary, shown_companies_set=None, top_n=3):
+def make_recommendations(user_text, interest=None, region=None, salary=None, shown_companies_set=None, top_n=3):
     if shown_companies_set is None:
         shown_companies_set = set()
 
@@ -310,37 +310,41 @@ def make_recommendations(user_text, interest, region, salary, shown_companies_se
 
     results = []
     for company, base_score in tfidf_ranked_companies:
-        # 기업명 없으면 추천 제외
         if not company.get("name"):
             continue
 
-        # 이미 추천한 기업은 제외
         company_key = (company.get("name"), company.get("summary"))
         if json.dumps(company_key, ensure_ascii=False) in shown_companies_set:
             continue
 
-        # 조건 기반 보정점수 적용
+        # 조건 기반 필터링 → 너무 엄격하지 않도록 완화
         boost = 0.0
-        if interest and interest.lower() in company.get("summary", "").lower():
-            boost += 0.02
-        if region and region.lower() in company.get("region", "").lower():
-            boost += 0.01
+
+        if interest:
+            if interest.lower() in company.get("summary", "").lower():
+                boost += 0.02
+
+        if region:
+            if region.lower() in company.get("region", "").lower():
+                boost += 0.01
+
         if salary:
             try:
                 salary_int = int(salary)
                 min_salary, max_salary = parse_salary_info(company.get("summary", ""))
                 if min_salary >= salary_int:
                     boost += 0.01
+                # else는 무시 (연봉이 낮아도 제외 안 함)
             except:
-                pass
+                pass  # 연봉 추출 실패 시 무시
 
         final_score = base_score + boost
         results.append((company, final_score))
 
-    # 점수 기준 내림차순 정렬
+    # 점수 높은 순으로 정렬
     results.sort(key=lambda x: x[1], reverse=True)
 
-    # top_n개 추출 및 shown_companies_set에 추가
+    # top_n개 반환 (중복 방지)
     top_results = []
     for comp, sim in results:
         comp_id = json.dumps((comp.get("name"), comp.get("summary")), ensure_ascii=False)
