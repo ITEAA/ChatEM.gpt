@@ -424,30 +424,28 @@ def chat():
                 top_n=3 # 첫 추천은 3개
             )
 
-                if not new_recommendations:
-                    return jsonify({"reply": "아쉽게도 현재 조건에 맞는 기업을 찾을 수 없습니다. 다른 조건을 말씀해주시거나 '추천 초기화'를 통해 다시 시작해 주시겠어요?"})
+            if not new_recommendations:
+                return jsonify({"reply": "아쉽게도 현재 조건에 맞는 기업을 찾을 수 없습니다. 다른 조건을 말씀해주시거나 '추천 초기화'를 통해 다시 시작해 주시겠어요?"})
 
-                explanations = []
-                for company, score in new_recommendations:
+            explanations = []
+            for company, score in new_recommendations:
                     # 임베딩 정보는 클라이언트에게 보낼 필요 없으므로 제거
-                    company_info_for_gpt = {
-                        "회사명": company.get("회사명", company.get("name", "정보 없음")),
-                        "채용공고명": company.get("채용공고명", company.get("summary", "정보 없음")),
-                        "지역": company.get("지역", company.get("region", "")),
-                        "산업": company.get("산업", company.get("industry", "")),
-                    }
-                    reason = generate_reason_individual(state["user_text"], company_info_for_gpt, score)
-                    explanations.append(
-                        f"**기업명**: {company_info_for_gpt['회사명']}\n"
-                        f"**채용공고명**: {company_info_for_gpt['채용공고명']}\n"
-                        f"**종합 점수**: {round(score,2)}\n"
-                        f"**설명**: {reason}\n"
-                    )
-                reply = "\n\n".join(explanations)
-                reply += "\n\n📌 더 궁금한 점이나 고려하고 싶은 조건이 있다면 말씀해 주세요. 추가로 반영해 드릴게요! 예를 들어 '더 추천해줘'라고 말씀하시면 다른 기업을 찾아드릴 수 있습니다."
-                return jsonify({"reply": reply})
-            else:
-                return jsonify({"reply": "관심 분야, 희망 근무지, 연봉을 '품질, 서울, 3000만원' 또는 '없음, 없음, 없음'과 같이 콤마(,)로 구분해서 입력해 주세요."})
+                company_info_for_gpt = {
+                    "회사명": company.get("회사명", company.get("name", "정보 없음")),
+                    "채용공고명": company.get("채용공고명", company.get("summary", "정보 없음")),
+                    "지역": company.get("지역", company.get("region", "")),
+                    "산업": company.get("산업", company.get("industry", "")),
+                }
+                reason = generate_reason_individual(state["user_text"], company_info_for_gpt, score)
+                explanations.append(
+                    f"**기업명**: {company_info_for_gpt['회사명']}\n"
+                    f"**채용공고명**: {company_info_for_gpt['채용공고명']}\n"
+                    f"**종합 점수**: {round(score,2)}\n"
+                    f"**설명**: {reason}\n"
+                )
+            reply = "\n\n".join(explanations)
+            reply += "\n\n📌 더 궁금한 점이나 고려하고 싶은 조건이 있다면 말씀해 주세요. 추가로 반영해 드릴게요! 예를 들어 '더 추천해줘'라고 말씀하시면 다른 기업을 찾아드릴 수 있습니다."
+            return jsonify({"reply": reply})
 
         # 4. "더 추천해줘" 요청 처리
         if state["user_text"] is not None and state["interest"] is not None and "더 추천해줘" in message:
