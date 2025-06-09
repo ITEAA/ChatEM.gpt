@@ -398,7 +398,7 @@ def chat():
         # 2. 파일 없이 메시지만 있을 경우
         if state["user_text"] is None:
             # 메시지 길이가 길거나 특정 키워드를 포함하면 자기소개서/이력서로 간주
-            if len(message.split()) > 30 or "이력서" in message or "자기소개서" in message:
+            if len(message) > 100 or "이력서" in message or "자기소개서" in message:
                 state["user_text"] = message
                 state["shown"] = set() # 텍스트 직접 입력 시에도 기존 추천 이력 초기화
                 user_states[user_id] = state # 상태 업데이트
