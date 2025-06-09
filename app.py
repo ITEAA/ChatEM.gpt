@@ -7,10 +7,6 @@ from sklearn.metrics.pairwise import cosine_similarity
 from flask import Flask, request, jsonify, render_template, send_from_directory
 import os
 
-@app.route("/")
-def home():
-    return render_template("index.html")
-
 app = Flask(__name__)
 
 # ✅ OpenAI API 키 설정
