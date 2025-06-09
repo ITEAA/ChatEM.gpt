@@ -61,7 +61,7 @@
       gap: 10px;
     }
 
-    #userInput, #interestInput, #regionInput, #salaryInput {
+    #userInput {
       padding: 10px;
       font-size: 16px;
       border-radius: 5px;
@@ -107,9 +107,6 @@
     const input = document.getElementById("userInput");
     const chatBox = document.getElementById("chatBox");
     const fileInput = document.getElementById("fileInput");
-    const interestInput = document.getElementById("interestInput");
-    const regionInput = document.getElementById("regionInput");
-    const salaryInput = document.getElementById("salaryInput");
 
     input.addEventListener("keydown", function (e) {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -126,7 +123,7 @@
 
       const userDiv = document.createElement("div");
       userDiv.className = "message user";
-      userDiv.innerText = message || `[이력서/자기소개서 업로드됨: ${file.name}]`;
+      userDiv.innerText = message || `[파일 업로드됨: ${file.name}]`;
       chatBox.appendChild(userDiv);
 
       const loadingDiv = document.createElement("div");
@@ -144,27 +141,13 @@
           body: formData,
         });
 
-        const contentType = response.headers.get("content-type") || "";
-
-        if (!response.ok) {
-          throw new Error(`서버 응답 오류: ${response.status}`);
-        }
-
-        if (contentType.includes("application/json")) {
-          const data = await response.json();
-          loadingDiv.innerText = data.reply;
-        } else {
-          const text = await response.text();
-          loadingDiv.innerText = "❌ 예상치 못한 응답 형식:\n" + text;
-        }
+        const data = await response.json();
+        loadingDiv.innerText = data.reply;
       } catch (err) {
         loadingDiv.innerText = "❌ 오류 발생: " + err.message;
       }
 
       input.value = "";
-      interestInput.value = "";
-      regionInput.value = "";
-      salaryInput.value = "";
       fileInput.value = null;
       input.focus();
       chatBox.scrollTop = chatBox.scrollHeight;
