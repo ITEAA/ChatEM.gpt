@@ -415,14 +415,14 @@ def chat():
             user_states[user_id] = state
 
                 # 선호도 입력 후 첫 추천 시작
-                new_recommendations = make_recommendations(
-                    user_text=state["user_text"],
-                    interest=state.get("interest"),
-                    region=state.get("region"),
-                    salary=state.get("salary"),
-                    shown_companies_set=state["shown"],
-                    top_n=3 # 첫 추천은 3개
-                )
+            new_recommendations = make_recommendations(
+                user_text=state["user_text"],
+                interest=state.get("interest"),
+                region=state.get("region"),
+                salary=state.get("salary"),
+                shown_companies_set=state["shown"],
+                top_n=3 # 첫 추천은 3개
+            )
 
                 if not new_recommendations:
                     return jsonify({"reply": "아쉽게도 현재 조건에 맞는 기업을 찾을 수 없습니다. 다른 조건을 말씀해주시거나 '추천 초기화'를 통해 다시 시작해 주시겠어요?"})
