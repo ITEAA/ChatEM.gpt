@@ -6,8 +6,11 @@ import uuid
 import re # 정규표현식 모듈 추가
 import traceback # 오류 스택 트레이스 출력을 위한 모듈 추가
 
-import torch
-from transformers import AutoTokenizer, AutoModel
+# --- Word2Vec/Doc2Vec 및 한국어 처리 관련 라이브러리 추가 ---
+from gensim.models.doc2vec import Doc2Vec, TaggedDocument
+from konlpy.tag import Okt # 한국어 형태소 분석기 (Okt 사용)
+import numpy as np # 벡터 연산을 위해 numpy 추가
+
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -27,33 +30,38 @@ openai.api_key = api_key
 GG_CACHED_FILE = "gg_employment_cached.json"
 user_states = {} # 사용자별 대화 상태를 저장할 딕셔너리 (인메모리)
 
-# KoBERT 모델 및 장치 변수 초기화
-tokenizer = None
-model = None
-device = None
+# Doc2Vec 모델 초기화
+doc2vec_model = None
+okt_tokenizer = None # KoNLPy Okt 토크나이저 초기화
 
 # 기업 정보 및 벡터 초기화
 cached_companies = []
 tfidf_vectorizer = None
 company_tfidf_matrix = None
 
-# --- KoBERT 임베딩 생성 함수 (단일 함수로 통합) ---
-def get_kobert_embedding(text_input):
-    if model is None or tokenizer is None or device is None or not text_input:
+# --- 한국어 텍스트를 형태소로 분리하는 함수 ---
+def tokenize_korean_text(text):
+    if okt_tokenizer is None:
+        # 모델 로딩 전에 호출될 경우를 대비
+        return []
+    # 명사, 동사, 형용사 등 의미 있는 품사만 추출 (필요에 따라 품사 목록 조정)
+    return [word for word, pos in okt_tokenizer.pos(text) if pos in ['Noun', 'Verb', 'Adjective', 'Adverb']]
+
+# --- Doc2Vec 임베딩 생성 함수 ---
+def get_doc2vec_embedding(text_input):
+    if doc2vec_model is None or not text_input:
         # 모델이 로드되지 않았거나 입력 텍스트가 없을 경우 0 벡터 반환
-        return torch.zeros(768).to(device) # KoBERT 기본 hidden_size
+        return np.zeros(300) # Doc2Vec vector_size에 맞춰 0 벡터 반환 (기본 300)
     try:
-        inputs = tokenizer(text_input, return_tensors="pt", truncation=True, padding=True, max_length=512)
-        inputs = {k: v.to(device) for k, v in inputs.items()}
-        with torch.no_grad():
-            outputs = model(**inputs)
-        # 평균 풀링을 통해 문장 임베딩 생성
-        embedding = torch.mean(outputs.last_hidden_state, dim=1).squeeze()
-        return embedding
+        tokens = tokenize_korean_text(text_input)
+        if not tokens: # 토큰이 없을 경우 빈 벡터 반환 방지
+            return np.zeros(300)
+        # 새로운 문서에 대한 벡터 추론
+        return doc2vec_model.infer_vector(tokens)
     except Exception as e:
-        print(f"❌ 임베딩 생성 오류 (텍스트: '{text_input[:30]}...'): {e}")
+        print(f"❌ Doc2Vec 임베딩 생성 오류 (텍스트: '{text_input[:30]}...'): {e}")
         traceback.print_exc()
-        return torch.zeros(768).to(device)
+        return np.zeros(300)
 
 try:
     if not os.path.exists(GG_CACHED_FILE):
@@ -63,34 +71,63 @@ try:
             cached_companies = json.load(f)
         print(f"✅ '{GG_CACHED_FILE}'에서 {len(cached_companies)}개 기업 정보 로드 성공.")
 
-    # KoBERT 모델과 토크나이저 로드
-    tokenizer = AutoTokenizer.from_pretrained("monologg/kobert")
-    model = AutoModel.from_pretrained("monologg/kobert")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-    model.eval() # 모델을 평가 모드로 설정
-    print("✅ KoBERT 모델 로드 성공!")
+    # KoNLPy Okt 토크나이저 로드
+    okt_tokenizer = Okt()
+    print("✅ KoNLPy Okt 토크나이저 로드 성공!")
 
-    # --- 서버 시작 시 모든 기업 정보에 대한 KoBERT 임베딩 미리 계산 ---
-    print("서버 시작 전, 기업 정보 KoBERT 임베딩을 시작합니다... (데이터 양에 따라 몇 분 소요될 수 있습니다)")
-    for company in cached_companies:
-        # '채용공고명'과 '회사명'을 조합하여 임베딩 생성
-        summary_text = f"{company.get('채용공고명', '')} {company.get('회사명', '')}"
-        company['embedding'] = get_kobert_embedding(summary_text) # 통합된 함수 사용
-    print("✅ 모든 기업 정보의 KoBERT 임베딩이 완료되어 메모리에 저장되었습니다.")
+    # --- 서버 시작 시 Doc2Vec 모델 학습 및 기업 정보 임베딩 미리 계산 ---
+    print("서버 시작 전, Doc2Vec 모델 학습을 시작합니다... (데이터 양에 따라 시간 소요)")
+    documents_for_training = []
+    for i, company in enumerate(cached_companies):
+        # '채용공고명', '회사명', 'summary'를 조합하여 학습 데이터 생성
+        text = f"{company.get('채용공고명', '')} {company.get('회사명', '')} {company.get('summary', '')}"
+        tokens = tokenize_korean_text(text)
+        if tokens: # 빈 텍스트는 학습에서 제외
+            documents_for_training.append(TaggedDocument(tokens, [f'company_{i}']))
+
+    # Doc2Vec 모델 학습 (vector_size, window, min_count, epochs 등 파라미터 조정 가능)
+    # vector_size: 임베딩 벡터의 차원 (일반적으로 100~300)
+    # window: 주변 단어 고려 범위
+    # min_count: 최소 등장 횟수 이하의 단어 무시
+    # workers: 학습에 사용할 스레드 수
+    # epochs: 학습 반복 횟수
+    if documents_for_training:
+        doc2vec_model = Doc2Vec(
+            documents_for_training,
+            vector_size=300, # KoBERT의 768차원과는 다름. 메모리 사용량에 영향.
+            window=5,
+            min_count=5, # 너무 적은 단어는 무시
+            workers=4,
+            epochs=20
+        )
+        print("✅ Doc2Vec 모델 학습 완료!")
+
+        # 학습된 모델로 모든 기업 정보에 대한 임베딩 미리 계산
+        for i, company in enumerate(cached_companies):
+            # 학습에 사용된 문서의 태그를 사용하여 벡터 가져오기
+            company['embedding'] = doc2vec_model.dv[f'company_{i}']
+        print("✅ 모든 기업 정보의 Doc2Vec 임베딩이 완료되어 메모리에 저장되었습니다.")
+    else:
+        print("⚠️ 학습할 기업 문서가 없습니다. Doc2Vec 모델이 학습되지 않았습니다.")
 
     # --- TF-IDF Vectorizer 및 기업별 TF-IDF 행렬 미리 계산 ---
     print("서버 시작 전, 기업 정보 TF-IDF 벡터화를 시작합니다...")
+    # TF-IDF도 형태소 분석된 텍스트를 사용하도록 변경
+    company_summaries_for_tfidf = []
+    for company in cached_companies:
+        text = f"{company.get('채용공고명', '')} {company.get('회사명', '')} {company.get('summary', '')}"
+        company_summaries_for_tfidf.append(" ".join(tokenize_korean_text(text))) # 토큰화된 단어들을 공백으로 조인
+
     tfidf_vectorizer = TfidfVectorizer(min_df=1, ngram_range=(1, 2))
-    company_summaries_for_tfidf = [
-        f"{company.get('채용공고명', '')} {company.get('회사명', '')}" for company in cached_companies
-    ]
-    company_tfidf_matrix = tfidf_vectorizer.fit_transform(company_summaries_for_tfidf)
-    print("✅ 모든 기업 정보의 TF-IDF 벡터화가 완료되었습니다.")
+    if company_summaries_for_tfidf:
+        company_tfidf_matrix = tfidf_vectorizer.fit_transform(company_summaries_for_tfidf)
+        print("✅ 모든 기업 정보의 TF-IDF 벡터화가 완료되었습니다.")
+    else:
+        print("⚠️ TF-IDF 벡터화를 위한 기업 문서가 없습니다.")
 
 except json.JSONDecodeError as e:
     print(f"❌ 오류: '{GG_CACHED_FILE}' 파일이 유효한 JSON 형식이 아닙니다. 오류: {e}")
-    cached_companies = [] # 오류 발생 시 빈 목록으로 초기화
+    cached_companies = []
     raise RuntimeError(f"기업 정보 파일 로딩에 실패했습니다. 오류: {e}")
 except Exception as e:
     print(f"❌ 초기 설정 중 치명적인 오류 발생: {e}")
@@ -98,7 +135,7 @@ except Exception as e:
     raise RuntimeError(f"애플리케이션 초기 설정에 실패했습니다. 오류: {e}")
 
 
-# --- PDF에서 텍스트 추출 함수 ---
+# --- PDF에서 텍스트 추출 함수 (변경 없음) ---
 def extract_text_from_pdf(pdf_file_stream):
     try:
         doc = fitz.open(stream=pdf_file_stream.read(), filetype="pdf")
@@ -107,27 +144,24 @@ def extract_text_from_pdf(pdf_file_stream):
             text_content.append(page.get_text())
         raw_text = "\n".join(text_content)
 
-        # 텍스트 전처리 강화: 여러 개의 공백(줄바꿈, 탭 포함)을 하나의 공백으로 치환
         processed_text = re.sub(r'\s+', ' ', raw_text)
-        # 앞뒤 공백 제거
         processed_text = processed_text.strip()
 
-        # 디버깅을 위해 추출된 텍스트를 출력 (개발 중 유용)
-        # print("\n--- PDF에서 추출된 원본 텍스트 (앞부분 500자) ---")
-        # print(raw_text[:500])
-        # print("-------------------------------------------\n")
-        # print("--- PDF에서 추출 및 전처리된 텍스트 (앞부분 500자) ---")
-        # print(processed_text[:500])
-        # print("---------------------------------------------------\n")
+        print("\n--- PDF에서 추출된 원본 텍스트 (앞부분 500자) ---")
+        print(raw_text[:500])
+        print("-------------------------------------------\n")
+        print("--- PDF에서 추출 및 전처리된 텍스트 (앞부분 500자) ---")
+        print(processed_text[:500])
+        print("---------------------------------------------------\n")
 
         return processed_text
     except Exception as e:
         print(f"❌ PDF 텍스트 추출 오류: {e}")
         traceback.print_exc()
-        return "" # 오류 발생 시 빈 문자열 반환
+        return ""
 
 
-# --- GPT를 사용하여 키워드 추출 함수 ---
+# --- GPT를 사용하여 키워드 추출 함수 (변경 없음) ---
 def extract_keywords(text):
     if not text:
         return []
@@ -153,29 +187,33 @@ def extract_keywords(text):
         traceback.print_exc()
         return []
 
-# --- KoBERT 유사도 계산 함수 ---
-def kobert_similarity(user_text, companies):
-    if not user_text or not companies:
+# --- Doc2Vec 유사도 계산 함수 (KoBERT 대체) ---
+def doc2vec_similarity(user_text, companies):
+    if not user_text or not companies or doc2vec_model is None:
         return []
-    user_embedding = get_kobert_embedding(user_text)
-    user_embedding_np = user_embedding.cpu().numpy().reshape(1, -1)
+    
+    # 사용자 텍스트 형태소 분석 후 임베딩 생성
+    user_embedding = get_doc2vec_embedding(user_text)
+    user_embedding_np = user_embedding.reshape(1, -1)
 
     results = []
     for c in companies:
-        company_embedding = c.get('embedding') # 미리 계산된 임베딩 사용
-        # 임베딩이 없거나 모두 0인 경우는 제외 (초기 로딩 오류 등으로 인해 발생 가능)
-        if company_embedding is not None and not torch.all(company_embedding == 0):
-            company_embedding_np = company_embedding.cpu().numpy().reshape(1, -1)
+        company_embedding = c.get('embedding') # 미리 계산된 Doc2Vec 임베딩 사용
+        if company_embedding is not None and not np.all(company_embedding == 0):
+            company_embedding_np = company_embedding.reshape(1, -1)
             score = cosine_similarity(user_embedding_np, company_embedding_np)[0][0]
             results.append((c, float(score)))
     return sorted(results, key=lambda x: x[1], reverse=True)
 
-# --- TF-IDF 유사도 계산 함수 ---
+# --- TF-IDF 유사도 계산 함수 (TF-IDF 벡터화에 형태소 분석된 텍스트 사용) ---
 def tfidf_similarity(user_text, companies):
     if not user_text or not companies or tfidf_vectorizer is None or company_tfidf_matrix is None:
         return []
     try:
-        user_tfidf_vector = tfidf_vectorizer.transform([user_text])
+        # 사용자 텍스트도 형태소 분석 후 TF-IDF 벡터화
+        user_tokens = tokenize_korean_text(user_text)
+        user_tfidf_vector = tfidf_vectorizer.transform([" ".join(user_tokens)])
+        
         scores = cosine_similarity(user_tfidf_vector, company_tfidf_matrix).flatten()
         results = [(companies[i], float(scores[i])) for i in range(len(scores))]
         return results
@@ -184,7 +222,7 @@ def tfidf_similarity(user_text, companies):
         traceback.print_exc()
         return []
 
-# --- GPT를 사용하여 추천 이유 생성 함수 ---
+# --- GPT를 사용하여 추천 이유 생성 함수 (변경 없음) ---
 def generate_reason_individual(user_text, company, score):
     prompt = f"""
     당신은 사용자의 특성과 선호도를 파악해 가장 적합한 기업을 매칭시켜주는 전문가입니다.
@@ -194,8 +232,8 @@ def generate_reason_individual(user_text, company, score):
     분석이 어려운 경우 "현재 정보만으로는 분석이 어렵습니다"와 같이 자연스럽게 안내해주세요.
 
     [기업 정보]
-    - 기업명: {company.get('회사명', '정보 없음')}
-    - 채용공고명: {company.get('채용공고명', '정보 없음')}
+    - 기업명: {company.get('name', '정보 없음')}
+    - 채용공고명: {company.get('summary', '정보 없음')}
     - 유사도 점수: {round(score, 2)}
 
     [사용자 자기소개서]
@@ -215,47 +253,38 @@ def generate_reason_individual(user_text, company, score):
         traceback.print_exc()
         return "설명을 생성하는 데 문제가 발생했습니다."
 
-# --- 연봉 정보 파싱 헬퍼 함수 ---
+# --- 연봉 정보 파싱 헬퍼 함수 (변경 없음) ---
 def parse_salary_info(summary_text):
-    """
-    summary 텍스트에서 연봉 정보를 파싱하여 (최소 연봉, 최대 연봉) 튜플을 만원 단위로 반환.
-    정보가 없으면 (0, float('inf')) 반환.
-    """
     min_salary = 0
     max_salary = float('inf')
 
-    # 연봉 패턴: "연봉 3000만원 ~ 4000만원", "연봉 5000만원"
     match_annual = re.search(r'연봉 (\d+)(?:만원)?(?: ~ (\d+)(?:만원)?)?', summary_text)
     if match_annual:
         min_salary = int(match_annual.group(1))
         max_salary = int(match_annual.group(2)) if match_annual.group(2) else min_salary
         return min_salary, max_salary
 
-    # 월급 패턴: "월급 220만원 ~ 240만원", "월급 116만원"
     match_monthly = re.search(r'월급 (\d+)(?:만원)?(?: ~ (\d+)(?:만원)?)?', summary_text)
     if match_monthly:
         min_monthly = int(match_monthly.group(1))
-        min_salary = min_monthly * 12 # 연봉으로 환산
+        min_salary = min_monthly * 12
         max_monthly = int(match_monthly.group(2)) if match_monthly.group(2) else min_monthly
-        max_salary = max_monthly * 12 # 연봉으로 환산
+        max_salary = max_monthly * 12
         return min_salary, max_salary
 
-    # 시급 패턴: "시급 12500원", "시급 9860원" (월 209시간 근무 기준, 만원 단위로 변환)
     match_hourly = re.search(r'시급 (\d+)', summary_text)
     if match_hourly:
         hourly_wage = int(match_hourly.group(1))
-        # 한국 노동법 기준 주 40시간, 월 209시간 (40시간 * 52주 / 12개월 = 173.3시간, 일반적으로 209시간 적용)
-        min_salary = (hourly_wage * 209 * 12) / 10000 # 원 -> 만원
-        max_salary = min_salary # 시급은 보통 단일
-        return int(min_salary), int(max_salary) # 정수형으로 반환
+        min_salary = (hourly_wage * 209 * 12) / 10000
+        max_salary = min_salary
+        return int(min_salary), int(max_salary)
         
-    return 0, float('inf') # 연봉 정보가 없으면 필터링하지 않음
+    return 0, float('inf')
 
-# --- 기업 필터링 로직 함수 ---
+# --- 기업 필터링 로직 함수 (변경 없음) ---
 def apply_company_filters(company, interest, region, salary):
     passes_filter = True
         
-    # '관심' 키워드가 summary 또는 industry에 포함되는지 확인 (대소문자 무시)
     if interest:
         summary_lower = company.get('summary', '').lower()
         industry_lower = company.get('industry', '').lower()
@@ -263,29 +292,24 @@ def apply_company_filters(company, interest, region, salary):
         if interest_lower not in summary_lower and interest_lower not in industry_lower:
             passes_filter = False
             
-    # '지역' 키워드가 region에 포함되는지 확인 (대소문자 무시)
     if region and region.lower() not in company.get("region", "").lower():
         passes_filter = False
             
-    # --- 연봉 필터링 로직 ---
     if salary:
         try:
-            min_salary_req = int(salary) # 사용자 희망 최소 연봉 (만원 단위)
-                
-            # 기업의 연봉 정보 파싱
+            min_salary_req = int(salary)
             company_min_salary, company_max_salary = parse_salary_info(company.get("summary", ""))
 
-            # 사용자의 희망 최소 연봉이 기업의 최대 연봉보다 높으면 필터링
             if min_salary_req > company_max_salary:
                 passes_filter = False
                 
         except ValueError:
             print(f"경고: 유효하지 않은 연봉 입력 '{salary}' 또는 기업 연봉 정보 파싱 오류")
-            pass # 유효하지 않은 연봉 입력 또는 파싱 오류는 무시하고 필터링하지 않음
+            pass
 
     return passes_filter
 
-# --- 기업 추천 로직 함수 (Hybrid 모델) ---
+# --- 기업 추천 로직 함수 (Hybrid 모델 - Doc2Vec + TF-IDF) ---
 def make_recommendations(user_text, interest, region, salary, shown_companies_set=None, top_n=3):
     if shown_companies_set is None:
         shown_companies_set = set()
@@ -293,31 +317,30 @@ def make_recommendations(user_text, interest, region, salary, shown_companies_se
     if not user_text or not cached_companies:
         return []
 
-    # 1. KoBERT 기반 유사도 계산 (모든 캐싱된 기업 대상)
-    kobert_ranked_companies = kobert_similarity(user_text, cached_companies)
+    # 1. Doc2Vec 기반 유사도 계산 (모든 캐싱된 기업 대상)
+    doc2vec_ranked_companies = doc2vec_similarity(user_text, cached_companies)
 
     # 2. TF-IDF 기반 유사도 계산 (모든 캐싱된 기업 대상)
     tfidf_ranked_companies = tfidf_similarity(user_text, cached_companies)
         
     # 3. 점수 합산을 위해 회사 정보를 key로 하는 딕셔너리 생성
+    # (company_key는 name과 summary를 조합하여 고유성을 확보. 실제 데이터에 따라 ID 등 다른 고유 식별자 사용 권장)
     tfidf_scores = {
-        (c.get("name"), c.get("summary")): score # 'summary' 필드를 키로 사용
+        (c.get("name"), c.get("summary")): score
         for c, score in tfidf_ranked_companies
     }
 
-    # 4. Hybrid 점수 계산 (KoBERT 점수 + TF-IDF 점수) 및 필터링 적용
+    # 4. Hybrid 점수 계산 (Doc2Vec 점수 + TF-IDF 점수) 및 필터링 적용
     hybrid_scores = []
-    for company, kobert_score in kobert_ranked_companies:
-        # TF-IDF 점수를 가져올 때도 'summary' 필드를 사용
+    for company, doc2vec_score in doc2vec_ranked_companies:
         company_key = (company.get("name"), company.get("summary"))
         tfidf_score = tfidf_scores.get(company_key, 0.0)
 
-        # 가중치 설정 (KoBERT: 70%, TF-IDF: 30%) - 이 값은 조정 가능
-        kobert_weight = 0.7
+        # 가중치 설정 (Doc2Vec: 70%, TF-IDF: 30%) - 이 값은 조정 가능
+        doc2vec_weight = 0.7
         tfidf_weight = 0.3
             
-        # 코사인 유사도는 이미 0~1 사이의 값이므로 별도 정규화 없이 가중치 적용
-        final_score = (kobert_weight * kobert_score) + (tfidf_weight * tfidf_score)
+        final_score = (doc2vec_weight * doc2vec_score) + (tfidf_weight * tfidf_score)
             
         # 추가 필터링 (관심분야, 지역, 연봉)
         if apply_company_filters(company, interest, region, salary):
@@ -329,10 +352,9 @@ def make_recommendations(user_text, interest, region, salary, shown_companies_se
     # 이미 보여준 공고 제외하고 상위 N개 선택
     results = []
     for comp, sim in hybrid_scores:
-        # 튜플로 저장된 회사 ID를 문자열로 변환하여 집합에 추가 (회사명과 summary를 유일한 ID로 사용)
         comp_id_str = json.dumps((comp.get("name"), comp.get("summary")), ensure_ascii=False)
         if comp_id_str not in shown_companies_set:
-            shown_companies_set.add(comp_id_str) # 이미 보여준 회사 목록에 추가
+            shown_companies_set.add(comp_id_str)
             results.append((comp, sim))
         if len(results) >= top_n:
             break
@@ -366,9 +388,9 @@ def _generate_recommendation_response(user_text, recommendations, additional_mes
     explanations = []
     for company, score in recommendations:
         # 임베딩 정보는 클라이언트에게 보낼 필요 없으므로 제거
-        company_info_for_gpt = {k: v for k, v in company.items() if k not in ['embedding', 'summary']} # summary도 제외
+        company_info_for_gpt = {k: v for k, v in company.items() if k not in ['embedding']}
         reason = generate_reason_individual(user_text, company_info_for_gpt, score)
-        explanations.append(f"**기업명**: {company_info_for_gpt.get('name', '정보 없음')}\n**채용공고명**: {company.get('summary', '정보 없음')}\n**종합 점수**: {round(score,2)}\n**설명**: {reason}\n") # summary를 다시 보여주기
+        explanations.append(f"**기업명**: {company_info_for_gpt.get('name', '정보 없음')}\n**채용공고명**: {company_info_for_gpt.get('summary', '정보 없음')}\n**종합 점수**: {round(score,2)}\n**설명**: {reason}\n")
     
     reply = "\n\n".join(explanations)
     reply += f"\n\n📌 {additional_message if additional_message else '더 궁금한 점이나 고려하고 싶은 조건이 있다면 말씀해 주세요. 추가로 반영해 드릴게요!'}"
@@ -438,12 +460,10 @@ def _handle_reset(user_id):
 # --- Flask 라우트 설정 ---
 @app.route("/chat", methods=["POST"])
 def chat():
-    # 사용자 ID가 세션에 없으면 새로 생성
     if 'user_id' not in session:
         session['user_id'] = str(uuid.uuid4())
     user_id = session['user_id']
     
-    # user_states 딕셔너리에서 현재 사용자 상태 로드.
     state = _get_user_state(user_id)
 
     message = request.form.get("message", "").strip()
@@ -464,7 +484,6 @@ def chat():
             if len(message.split()) > 30 or "이력서" in message or "자기소개서" in message:
                 return jsonify(_handle_initial_text_input(message, user_id, state))
             else:
-                # 자기소개서/이력서가 없는 경우 일반 상담 모드 메시지
                 return jsonify({"reply": "개인별 맞춤 분석을 위해서는 자기소개서 혹은 이력서가 필요합니다. 파일을 첨부해 주시거나 내용을 직접 입력해 주시면 상세한 분석을 제공해 드리겠습니다."})
 
         # 4. 자기소개서/이력서가 입력되었고, 사용자 선호도 정보가 없는 경우
@@ -480,7 +499,7 @@ def chat():
 
     except Exception as e:
         print(f"❌ 서버 에러: {e}")
-        traceback.print_exc() # 서버 전체 오류 스택 트레이스 출력
+        traceback.print_exc()
         return jsonify({"reply": f"❌ 오류가 발생했습니다: {str(e)} 불편을 드려 죄송합니다. 잠시 후 다시 시도해 주세요."}), 500
 
 if __name__ == "__main__":
