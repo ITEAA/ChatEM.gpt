@@ -107,38 +107,17 @@ def filter_companies(keywords, interest=None, region=None, salary=None):
     return filtered
 
 def generate_reason(user_text, companies_with_scores):
-    companies_info = []
+    output_lines = []
     for company, score in companies_with_scores:
-        companies_info.append({
-            "name": company.get("회사명") or company.get("name"),
-            "summary": company.get("summary") or company.get("채용공고명"),
-            "score": score
-        })
-
-    prompt = f"""
-당신은 채용 컨설턴트입니다.
-아래 자기소개서와 기업 정보를 참고하여, 각 기업이 사용자에게 왜 적합한지 친절하고 전문적인 말투로 설명해 주세요.
-
-[자기소개서 내용]
-{user_text}
-
-[기업 목록 및 유사도 점수]
-{json.dumps(companies_info, ensure_ascii=False)}
-
-출력 형식:
-기업명: 설명
-유사도 점수: 0.XX
-"""
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        print(f"❌ GPT 추천 설명 생성 에러: {e}")
-        return "추천 이유를 생성하는 중 오류가 발생했습니다."
+        name = company.get("회사명") or company.get("name")
+        title = company.get("채용공고명") or company.get("summary")
+        location = company.get("근무지역") or company.get("region") or "지역 정보 없음"
+        salary = company.get("급여") or "급여 정보 없음"
+        summary = f"{name}은(는) {location}에서 {title} 직무를 수행할 인재를 모집 중이며, 급여 조건은 {salary}입니다."
+        recommendation = f"기업명: {name}\n업무: {title}\n유사도 점수: {score}\n{summary}\n"
+        output_lines.append(recommendation)
+    output_lines.append("\n📌 더 궁금한 점이나 고려하고 싶은 조건이 있다면 말씀해 주세요. 추가로 반영해 드릴게요!")
+    return "\n\n".join(output_lines)
 
 @app.route("/")
 def index():
