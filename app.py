@@ -414,14 +414,14 @@ def chat():
             state["salary"] = parts[2].replace("만원", "") if len(parts) > 2 and parts[2].lower() != "없음" else ""
             user_states[user_id] = state
 
-                # 선호도 입력 후 첫 추천 시작
+            # 선호도 입력 후 첫 추천 시작
             new_recommendations = make_recommendations(
                 user_text=state["user_text"],
                 interest=state.get("interest"),
                 region=state.get("region"),
                 salary=state.get("salary"),
                 shown_companies_set=state["shown"],
-                top_n=3 # 첫 추천은 3개
+                top_n=3  # 첫 추천은 3개
             )
 
             if not new_recommendations:
@@ -429,7 +429,7 @@ def chat():
 
             explanations = []
             for company, score in new_recommendations:
-                    # 임베딩 정보는 클라이언트에게 보낼 필요 없으므로 제거
+                # 임베딩 정보는 클라이언트에게 보낼 필요 없으므로 제거
                 company_info_for_gpt = {
                     "회사명": company.get("회사명", company.get("name", "정보 없음")),
                     "채용공고명": company.get("채용공고명", company.get("summary", "정보 없음")),
@@ -443,6 +443,7 @@ def chat():
                     f"**종합 점수**: {round(score,2)}\n"
                     f"**설명**: {reason}\n"
                 )
+
             reply = "\n\n".join(explanations)
             reply += "\n\n📌 더 궁금한 점이나 고려하고 싶은 조건이 있다면 말씀해 주세요. 추가로 반영해 드릴게요! 예를 들어 '더 추천해줘'라고 말씀하시면 다른 기업을 찾아드릴 수 있습니다."
             return jsonify({"reply": reply})
@@ -455,7 +456,7 @@ def chat():
                 region=state.get("region"),
                 salary=state.get("salary"),
                 shown_companies_set=state["shown"],
-                top_n=1 # 추가 추천은 1개씩
+                top_n=1  # 추가 추천은 1개씩
             )
 
             if not new_recommendations:
@@ -480,15 +481,14 @@ def chat():
             reply = "\n\n".join(explanations)
             reply += "\n\n📌 더 궁금한 점이나 고려하고 싶은 조건이 있다면 말씀해 주세요. 추가로 반영해 드릴게요! 또는 '추천 초기화'라고 말씀하시면 처음부터 다시 시작할 수 있습니다."
             return jsonify({"reply": reply})
-            
+
         # 5. "추천 초기화" 요청 처리
         if "추천 초기화" in message:
             # user_states에서 해당 사용자 ID의 상태를 완전히 제거
             user_states.pop(user_id, None)
             return jsonify({"reply": "추천 상태가 초기화되었습니다. 새로운 자기소개서/이력서 파일을 첨부하시거나 내용을 직접 입력해 주세요."})
 
-        # 기타 일반 메시지 처리 (자기소개서/이력서 및 선호도 입력 후)
-        # 이 단계에서 다른 질문이 오면 이해하지 못한다고 응답
+        # 기타 일반 메시지 처리
         return jsonify({"reply": "무슨 말씀이신지 정확히 이해하지 못했습니다. 자기소개서/이력서를 첨부해 주시거나, '추천 초기화'를 통해 다시 시작할 수 있습니다."})
 
     except Exception as e:
