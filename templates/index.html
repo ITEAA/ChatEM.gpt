@@ -1,147 +1,93 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8" />
-  <title>ChatEM 기업 매칭 챗봇</title>
-  <style>
-    body {
-      font-family: 'Segoe UI', sans-serif;
-      background-color: #f4f4f4;
-      margin: 0;
-      padding: 30px 0;
-      display: flex;
-      justify-content: center;
-    }
-
-    #chatContainer {
-      width: 100%;
-      max-width: 600px;
-      background: white;
-      border-radius: 10px;
-      padding: 20px;
-      box-shadow: 0 0 10px rgba(0,0,0,0.1);
-      display: flex;
-      flex-direction: column;
-    }
-
-    #chatBox {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      padding: 10px;
-      background: #fafafa;
-      border-radius: 8px;
-      min-height: 300px;
-      max-height: 500px;
-      overflow-y: auto;
-    }
-
-    .message {
-      padding: 10px 15px;
-      border-radius: 15px;
-      max-width: 80%;
-      word-wrap: break-word;
-      white-space: pre-wrap;
-    }
-
-    .user {
-      background: #d1e7dd;
-      align-self: flex-end;
-    }
-
-    .gpt {
-      background: #e2e3e5;
-      align-self: flex-start;
-    }
-
-    #inputArea {
-      display: flex;
-      flex-direction: column;
-      margin-top: 15px;
-      gap: 10px;
-    }
-
-    #userInput {
-      padding: 10px;
-      font-size: 16px;
-      border-radius: 5px;
-      border: 1px solid #ccc;
-    }
-
-    #sendBtn {
-      padding: 10px;
-      font-size: 16px;
-      border: none;
-      background-color: #4CAF50;
-      color: white;
-      border-radius: 5px;
-      cursor: pointer;
-      width: 100px;
-      align-self: flex-end;
-    }
-
-    #sendBtn:hover {
-      background-color: #45a049;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <title>ChatEM 챗봇</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f2f2f2;
+            padding: 20px;
+        }
+        #chat-box {
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        #messages {
+            min-height: 300px;
+            margin-bottom: 20px;
+        }
+        .message {
+            margin-bottom: 10px;
+        }
+        .user {
+            font-weight: bold;
+        }
+        .bot {
+            color: #333;
+        }
+        input[type="text"] {
+            width: 80%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        button {
+            padding: 10px 20px;
+            border: none;
+            background-color: #007BFF;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
 </head>
 <body>
-  <div id="chatContainer">
-    <h2>ChatEM</h2>
-    <div id="chatBox">
-      <div class="message gpt">안녕하세요! 자기소개서를 입력하시면 기업을 추천해드릴게요 😊</div>
+    <div id="chat-box">
+        <div id="messages"></div>
+        <input type="text" id="user-input" placeholder="이력서 또는 자기소개서를 입력해주세요...">
+        <button onclick="sendMessage()">보내기</button>
     </div>
 
-    <div id="inputArea">
-      <textarea id="userInput" placeholder="자기소개서를 입력하세요..." rows="4"></textarea>
-      <button id="sendBtn" onclick="sendMessage()">보내기</button>
-    </div>
-  </div>
+    <script>
+        async function sendMessage() {
+            const input = document.getElementById('user-input');
+            const messagesDiv = document.getElementById('messages');
+            const userText = input.value;
+            if (!userText.trim()) return;
 
-  <script>
-    const input = document.getElementById("userInput");
-    const chatBox = document.getElementById("chatBox");
+            const userMessage = document.createElement('div');
+            userMessage.className = 'message user';
+            userMessage.innerText = '사용자: ' + userText;
+            messagesDiv.appendChild(userMessage);
 
-    async function sendMessage() {
-      const message = input.value.trim();
-      if (!message) return;
+            input.value = '';
 
-      const userDiv = document.createElement("div");
-      userDiv.className = "message user";
-      userDiv.innerText = message;
-      chatBox.appendChild(userDiv);
+            const response = await fetch('/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ message: userText })
+            });
 
-      const loadingDiv = document.createElement("div");
-      loadingDiv.className = "message gpt";
-      loadingDiv.innerText = "분석 중입니다. 잠시만 기다려주세요...";
-      chatBox.appendChild(loadingDiv);
+            const data = await response.json();
 
-      const formData = new FormData();
-      formData.append("message", message);
+            const botMessage = document.createElement('div');
+            botMessage.className = 'message bot';
+            botMessage.innerText = '챗봇: ' + (data.message || data.error);
+            messagesDiv.appendChild(botMessage);
 
-      try {
-        const response = await fetch("/chat", {
-          method: "POST",
-          body: formData,
-        });
-
-        const data = await response.json();
-        loadingDiv.innerText = data.reply;
-      } catch (err) {
-        loadingDiv.innerText = "❌ 오류 발생: " + err.message;
-      }
-
-      input.value = "";
-      input.focus();
-      chatBox.scrollTop = chatBox.scrollHeight;
-    }
-
-    input.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        sendMessage();
-      }
-    });
-  </script>
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+    </script>
 </body>
 </html>
