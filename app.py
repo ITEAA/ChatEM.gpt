@@ -305,87 +305,52 @@ def make_recommendations(user_text, interest, region, salary, shown_companies_se
     if not user_text or not cached_companies:
         return []
 
-    # 1. KoBERT 기반 유사도 계산 (모든 캐싱된 기업 대상)
-    kobert_ranked_companies = kobert_similarity(user_text, cached_companies)
-
-    # 2. TF-IDF 기반 유사도 계산 (모든 캐싱된 기업 대상)
+    # TF-IDF 기반 유사도 계산
     tfidf_ranked_companies = tfidf_similarity(user_text, cached_companies)
-    
-    # 3. 점수 합산을 위해 회사 정보를 key로 하는 딕셔너리 생성
-    tfidf_scores = {
-        (c.get("name"), c.get("summary")): score # 'summary' 필드를 키로 사용
-        for c, score in tfidf_ranked_companies
-    }
 
-    # 4. Hybrid 점수 계산 (KoBERT 점수 + TF-IDF 점수)
-    hybrid_scores = []
-    for company, kobert_score in kobert_ranked_companies:
-        # TF-IDF 점수를 가져올 때도 'summary' 필드를 사용
+    results = []
+    for company, base_score in tfidf_ranked_companies:
+        # 기업명 없으면 추천 제외
+        if not company.get("name"):
+            continue
+
+        # 이미 추천한 기업은 제외
         company_key = (company.get("name"), company.get("summary"))
-        tfidf_score = tfidf_scores.get(company_key, 0.0)
+        if json.dumps(company_key, ensure_ascii=False) in shown_companies_set:
+            continue
 
-        # 가중치 설정 (KoBERT: 70%, TF-IDF: 30%) - 이 값은 조정 가능
-        kobert_weight = 0.7
-        tfidf_weight = 0.3
-        
-        # 코사인 유사도는 이미 0~1 사이의 값이므로 별도 정규화 없이 가중치 적용
-        final_score = (kobert_weight * kobert_score) + (tfidf_weight * tfidf_score)
-        
-        # 추가 필터링 (관심분야, 지역, 연봉)
-        passes_filter = True
-        
-        # '관심' 키워드가 summary 또는 industry에 포함되는지 확인 (대소문자 무시)
-        if interest:
-            summary_lower = company.get('summary', '').lower()
-            industry_lower = company.get('industry', '').lower()
-            interest_lower = interest.lower()
-            if interest_lower not in summary_lower and interest_lower not in industry_lower:
-                passes_filter = False
-        
-        # '지역' 키워드가 region에 포함되는지 확인 (대소문자 무시)
-        if region and region.lower() not in company.get("region", "").lower():
-            passes_filter = False
-        
-        # --- 연봉 필터링 로직 ---
+        # 조건 기반 보정점수 적용
+        boost = 0.0
+        if interest and interest.lower() in company.get("summary", "").lower():
+            boost += 0.02
+        if region and region.lower() in company.get("region", "").lower():
+            boost += 0.01
         if salary:
             try:
-                min_salary_req = int(salary) # 사용자 희망 최소 연봉 (만원 단위)
-                
-                # 기업의 연봉 정보 파싱
-                company_min_salary, company_max_salary = parse_salary_info(company.get("summary", ""))
+                salary_int = int(salary)
+                min_salary, max_salary = parse_salary_info(company.get("summary", ""))
+                if min_salary >= salary_int:
+                    boost += 0.01
+            except:
+                pass
 
-                # 사용자의 희망 최소 연봉이 기업의 최대 연봉보다 높으면 필터링
-                # 또는 기업의 최소 연봉이 사용자의 희망 연봉보다 너무 높으면 필터링
-                # (예: 사용자가 3천만원 희망하는데, 기업이 5천만원부터 시작하는 경우)
-                # 이 로직은 서비스 정책에 따라 조절
-                if min_salary_req > company_max_salary:
-                    passes_filter = False
-                # elif company_min_salary > min_salary_req * 1.2: # 기업 최소 연봉이 사용자 희망 연봉의 120% 초과
-                #     passes_filter = False
-                
-            except ValueError:
-                print(f"경고: 유효하지 않은 연봉 입력 '{salary}' 또는 기업 연봉 정보 파싱 오류")
-                pass # 유효하지 않은 연봉 입력 또는 파싱 오류는 무시하고 필터링하지 않음
+        final_score = base_score + boost
+        results.append((company, final_score))
 
-        if passes_filter:
-            hybrid_scores.append((company, final_score))
+    # 점수 기준 내림차순 정렬
+    results.sort(key=lambda x: x[1], reverse=True)
 
-    # 최종 점수를 기준으로 내림차순 정렬
-    hybrid_scores.sort(key=lambda x: x[1], reverse=True)
-    
-    # 이미 보여준 공고 제외하고 상위 N개 선택
-    results = []
-    for comp, sim in hybrid_scores:
-        # 튜플로 저장된 회사 ID를 문자열로 변환하여 집합에 추가 (회사명과 summary를 유일한 ID로 사용)
-        comp_id_str = json.dumps((comp.get("name"), comp.get("summary")), ensure_ascii=False)
-        if comp_id_str not in shown_companies_set:
-            shown_companies_set.add(comp_id_str) # 이미 보여준 회사 목록에 추가
-            results.append((comp, sim))
-        if len(results) >= top_n:
+    # top_n개 추출 및 shown_companies_set에 추가
+    top_results = []
+    for comp, sim in results:
+        comp_id = json.dumps((comp.get("name"), comp.get("summary")), ensure_ascii=False)
+        if comp_id not in shown_companies_set:
+            shown_companies_set.add(comp_id)
+            top_results.append((comp, sim))
+        if len(top_results) >= top_n:
             break
-            
-    return results
 
+    return top_results
 
 # --- Flask 라우트 설정 ---
 @app.route("/")
