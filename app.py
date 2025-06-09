@@ -1,4 +1,4 @@
-# ✅ app.py
+# ✅ app.py (개선: 자기소개서 기반 추천 사유, 불필요한 목록 제거)
 import os
 import json
 import fitz  # PyMuPDF
@@ -109,43 +109,40 @@ def filter_companies(keywords, interest=None, region=None, salary=None):
     return filtered
 
 def generate_reason(user_text, companies_with_scores):
-    companies_info = []
+    explanations = []
     for company, score in companies_with_scores:
-        companies_info.append({
-            "name": company.get("회사명") or company.get("name"),
-            "summary": company.get("summary") or company.get("채용공고명"),
-            "score": score
-        })
-
-    prompt = f"""
-당신은 채용 컨설턴트입니다.
-아래 자기소개서와 기업 정보를 참고하여, 각 기업이 사용자에게 왜 적합한지 친절하고 전문적인 말투로 설명해 주세요.
-각 기업마다 아래 형식에 맞춰 출력해 주세요.
-
-출력 예시:
-기업명: OOO
-업무: OOO
-유사도 점수: 0.XX
-OOO 기업은 ~~~ (사용자의 자기소개서 내용과 연관지어 구체적이고 설득력 있는 이유 제공)
+        name = company.get("회사명") or company.get("name")
+        title = company.get("채용공고명") or company.get("summary")
+        prompt = f"""
+당신은 채용 컨설턴트입니다. 다음 자기소개서를 참고하여 아래 기업의 직무가 왜 이 사용자에게 적합한지 설명해 주세요.
 
 [자기소개서 내용]
 {user_text}
 
-[기업 목록 및 유사도 점수]
-{json.dumps(companies_info, ensure_ascii=False)}
+기업명: {name}
+업무: {title}
+유사도 점수: {score}
+
+아래 형식으로 작성:
+기업명: {name}
+업무: {title}
+유사도 점수: {score}
+설명: ~~~ (자기소개서의 실제 기술 내용과 연결된 설득력 있는 이유)
 """
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3
-        )
-        explanation = response.choices[0].message.content
-        explanation += "\n\n📌 더 궁금한 점이나 고려하고 싶은 조건이 있다면 말씀해 주세요. 추가로 반영해 드릴게요!"
-        return explanation
-    except Exception as e:
-        print(f"❌ GPT 추천 설명 생성 에러: {e}")
-        return "추천 이유를 생성하는 중 오류가 발생했습니다."
+        try:
+            response = openai.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3
+            )
+            explanation = response.choices[0].message.content.strip()
+            explanations.append(explanation)
+        except Exception as e:
+            print(f"❌ GPT 설명 생성 실패: {e}")
+            explanations.append(f"기업명: {name}\n업무: {title}\n유사도 점수: {score}\n설명: (설명 생성 실패)")
+
+    explanations.append("\n📌 더 궁금한 점이나 고려하고 싶은 조건이 있다면 말씀해 주세요. 추가로 반영해 드릴게요!")
+    return "\n\n".join(explanations)
 
 @app.route("/")
 def index():
