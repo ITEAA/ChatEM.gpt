@@ -242,6 +242,9 @@ def generate_reason_individual(user_text, company, score):
     {user_text}
 
     [설명 시작]
+    - 기업의 채용공고 내용을 설명하지 말고, 사용자의 자소서와 어떻게 연결되는지를 중심으로 설명해줘.
+    - 채용공고 자체에 대한 안내, 예: "이 기업은 어떤 기업이고 무슨 채용공고인지 알려줄게요" 같은 표현은 쓰지 마.
+    - 문장은 자연스럽고 분석적인 어투로, 5~7문장으로 써줘.
     """
     try:
         response = openai.chat.completions.create(
