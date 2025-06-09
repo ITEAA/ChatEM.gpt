@@ -429,10 +429,10 @@ def chat():
                 for company, score in new_recommendations:
                     # 임베딩 정보는 클라이언트에게 보낼 필요 없으므로 제거
                     company_info_for_gpt = {
-                    "회사명": company.get("회사명", company.get("name", "정보 없음")),
-                    "채용공고명": company.get("채용공고명", company.get("summary", "정보 없음")),
-                    "지역": company.get("지역", company.get("region", "")),
-                    "산업": company.get("산업", company.get("industry", "")),
+                        "회사명": company.get("회사명", company.get("name", "정보 없음")),
+                        "채용공고명": company.get("채용공고명", company.get("summary", "정보 없음")),
+                        "지역": company.get("지역", company.get("region", "")),
+                        "산업": company.get("산업", company.get("industry", "")),
                     }
                     reason = generate_reason_individual(state["user_text"], company_info_for_gpt, score)
                     explanations.append(
@@ -463,9 +463,19 @@ def chat():
 
             explanations = []
             for company, score in new_recommendations:
-                company_info_for_gpt = {k: v for k, v in company.items() if k not in ['embedding', 'summary']} # summary도 제외
+                company_info_for_gpt = {
+                    "회사명": company.get("회사명", company.get("name", "정보 없음")),
+                    "채용공고명": company.get("채용공고명", company.get("summary", "정보 없음")),
+                    "지역": company.get("지역", company.get("region", "")),
+                    "산업": company.get("산업", company.get("industry", "")),
+                }
                 reason = generate_reason_individual(state["user_text"], company_info_for_gpt, score)
-                explanations.append(f"**기업명**: {company_info_for_gpt.get('name', '정보 없음')}\n**채용공고명**: {company_info_for_gpt.get('summary', '정보 없음')}\n**종합 점수**: {round(score,2)}\n**설명**: {reason}\n") # summary를 다시 보여주기
+                explanations.append(
+                    f"**기업명**: {company_info_for_gpt['회사명']}\n"
+                    f"**채용공고명**: {company_info_for_gpt['채용공고명']}\n"
+                    f"**종합 점수**: {round(score,2)}\n"
+                    f"**설명**: {reason}\n"
+                )
 
             reply = "\n\n".join(explanations)
             reply += "\n\n📌 더 궁금한 점이나 고려하고 싶은 조건이 있다면 말씀해 주세요. 추가로 반영해 드릴게요! 또는 '추천 초기화'라고 말씀하시면 처음부터 다시 시작할 수 있습니다."
