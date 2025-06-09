@@ -53,6 +53,7 @@ def extract_keywords(text):
         return []
 
 def fetch_gg_employment_info(index=1, size=100):
+    print("📡 [API 호출됨] 경기도 고용정보 API 요청 중...")
     params = {"KEY": GG_API_KEY, "Type": "xml", "pIndex": index, "pSize": size}
     try:
         response = requests.get(GG_API_URL, params=params)
